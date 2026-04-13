@@ -2456,6 +2456,7 @@ function AppContent() {
   const [clubSubscriptions, setClubSubscriptions] = useState<ClubSubscription[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [isClubSubscriptionModalOpen, setIsClubSubscriptionModalOpen] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isPublicBookingView, setIsPublicBookingView] = useState(false);
   const [editingClubSub, setEditingClubSub] = useState<ClubSubscription | null>(null);
   const [clubSubBuildingFilter, setClubSubBuildingFilter] = useState('all');
@@ -2958,19 +2959,39 @@ function AppContent() {
   }, [user]);
 
   const signIn = async () => {
+    if (isLoggingIn) return;
+    setIsLoggingIn(true);
     const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    
     try {
-      await signInWithPopup(auth, provider);
+      console.log('Starting sign in process...');
+      const result = await signInWithPopup(auth, provider);
+      console.log('Sign in successful:', result.user.email);
       toast.success('تم تسجيل الدخول بنجاح');
     } catch (error: any) {
-      console.error('Sign in error:', error);
+      console.error('Detailed sign in error:', error);
       let message = 'حدث خطأ أثناء تسجيل الدخول.';
+      
       if (error.code === 'auth/popup-blocked') {
-        message = 'تم حظر النافذة المنبثقة. يرجى السماح بالمنبثقات للموقع.';
+        message = 'تم حظر النافذة المنبثقة. يرجى السماح بالمنبثقات للموقع في إعدادات المتصفح.';
       } else if (error.code === 'auth/unauthorized-domain') {
-        message = 'هذا النطاق غير مصرح له بتسجيل الدخول. يرجى مراجعة إعدادات Firebase.';
+        message = 'هذا النطاق غير مصرح له بتسجيل الدخول. يرجى مراجعة إعدادات Firebase Authorized Domains.';
+      } else if (error.code === 'auth/popup-closed-by-user') {
+        message = 'تم إغلاق نافذة تسجيل الدخول قبل إتمام العملية.';
+      } else if (error.code === 'auth/cancelled-popup-request') {
+        message = 'تم إلغاء طلب تسجيل الدخول. يرجى المحاولة مرة أخرى.';
+      } else if (error.code === 'auth/network-request-failed') {
+        message = 'خطأ في الاتصال بالشبكة. يرجى التحقق من اتصالك بالإنترنت.';
+      } else if (error.message) {
+        message = `خطأ: ${error.message}`;
       }
-      toast.error(message);
+      
+      toast.error(message, {
+        duration: 5000,
+      });
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -3469,10 +3490,21 @@ function AppContent() {
           <p className="text-gray-500 dark:text-slate-400 mb-10 text-lg">إدارة ذكية لطلبات النظافة في مجمعاتنا السكنية</p>
           <button 
             onClick={signIn}
-            className="w-full flex items-center justify-center gap-4 bg-white dark:bg-slate-800 border-2 border-gray-100 dark:border-slate-700 py-4 rounded-2xl font-bold text-gray-700 dark:text-white hover:bg-gray-50 dark:hover:bg-slate-700 hover:border-primary transition-all shadow-sm"
+            disabled={isLoggingIn}
+            className="w-full flex items-center justify-center gap-4 bg-white dark:bg-slate-800 border-2 border-gray-100 dark:border-slate-700 py-4 rounded-2xl font-bold text-gray-700 dark:text-white hover:bg-gray-50 dark:hover:bg-slate-700 hover:border-primary transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-6 h-6" />
-            الدخول عبر جوجل
+            {isLoggingIn ? (
+              <motion.div 
+                animate={{ rotate: 360 }}
+                transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                className="rounded-full h-6 w-6 border-2 border-primary border-t-transparent"
+              />
+            ) : (
+              <>
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-6 h-6" />
+                الدخول عبر جوجل
+              </>
+            )}
           </button>
         </motion.div>
       </div>
