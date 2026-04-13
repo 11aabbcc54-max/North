@@ -2456,7 +2456,8 @@ function AppContent() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [isClubSubscriptionModalOpen, setIsClubSubscriptionModalOpen] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
+  const [isRegisterMode, setIsRegisterMode] = useState(false);
+  const [loginForm, setLoginForm] = useState({ username: '', password: '', displayName: '' });
   const [isPublicBookingView, setIsPublicBookingView] = useState(false);
   const [editingClubSub, setEditingClubSub] = useState<ClubSubscription | null>(null);
   const [clubSubBuildingFilter, setClubSubBuildingFilter] = useState('all');
@@ -2492,7 +2493,7 @@ function AppContent() {
   const inventoryReportRef = useRef<HTMLDivElement>(null);
   const staffReportRef = useRef<HTMLDivElement>(null);
   const bulkInvoicesRef = useRef<HTMLDivElement>(null);
-  const isAdmin = user?.uid === 'fyozr-admin-user' || user?.email === '11aabbcc54@gmail.com';
+  const isAdmin = user?.uid === 'fyozr-admin-user' || user?.email === '11aabbcc54@gmail.com' || (user as any)?.role === 'admin';
 
   useEffect(() => {
     if (searchTerm.trim() !== '') {
@@ -2958,38 +2959,91 @@ function AppContent() {
     return () => unsubscribe();
   }, [user]);
 
-  const signIn = async (e?: React.FormEvent) => {
+  const handleAuth = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (isLoggingIn) return;
     
-    if (loginForm.username !== 'Fyozr' || loginForm.password !== '5150') {
-      toast.error('اسم المستخدم أو كلمة المرور غير صحيحة');
+    if (!loginForm.username || !loginForm.password) {
+      toast.error('يرجى إدخال اسم المستخدم وكلمة المرور');
+      return;
+    }
+
+    if (isRegisterMode && !loginForm.displayName) {
+      toast.error('يرجى إدخال الاسم الكامل');
       return;
     }
 
     setIsLoggingIn(true);
     
     try {
-      console.log('Attempting login bypass...');
-      // Simple bypass: just set the user in state if credentials match
-      // Since we can't use Custom Tokens without IAM API, and can't use Anonymous Auth without manual toggle,
-      // we'll use a local state-based session for this specific admin user.
+      const usersRef = collection(db, 'users');
       
-      // We'll mock a user object that looks like a Firebase User
-      const mockUser = {
-        uid: 'fyozr-admin-user',
-        email: 'Fyozr@system.local',
-        displayName: 'Fyozr',
-        isAnonymous: false,
-        emailVerified: true,
-      } as User;
+      if (isRegisterMode) {
+        // Registration Logic
+        const q = query(usersRef, where('username', '==', loginForm.username.toLowerCase()));
+        const querySnapshot = await getDocs(q);
+        
+        if (!querySnapshot.empty) {
+          toast.error('اسم المستخدم موجود مسبقاً');
+          setIsLoggingIn(false);
+          return;
+        }
 
-      setUser(mockUser);
-      setLoading(false);
-      toast.success('تم تسجيل الدخول بنجاح');
+        const newUser = {
+          uid: 'user-' + Date.now(),
+          username: loginForm.username.toLowerCase(),
+          password: loginForm.password, // In a real app, hash this
+          displayName: loginForm.displayName,
+          email: `${loginForm.username.toLowerCase()}@fyozr.local`,
+          role: 'admin', // Default to admin for now as per user request to "share the table"
+          createdAt: Timestamp.now()
+        };
+
+        await addDoc(usersRef, newUser);
+        setUser(newUser as any);
+        setLoading(false);
+        toast.success('تم إنشاء الحساب وتسجيل الدخول بنجاح');
+      } else {
+        // Login Logic
+        // Fallback for hardcoded admin
+        if (loginForm.username === 'Fyozr' && loginForm.password === '5150') {
+          const mockUser = {
+            uid: 'fyozr-admin-user',
+            email: 'Fyozr@system.local',
+            displayName: 'Fyozr',
+            isAnonymous: false,
+            emailVerified: true,
+            role: 'admin'
+          } as any;
+          setUser(mockUser);
+          setLoading(false);
+          toast.success('تم تسجيل الدخول بنجاح');
+          return;
+        }
+
+        const q = query(usersRef, 
+          where('username', '==', loginForm.username.toLowerCase()),
+          where('password', '==', loginForm.password)
+        );
+        const querySnapshot = await getDocs(q);
+
+        if (querySnapshot.empty) {
+          toast.error('اسم المستخدم أو كلمة المرور غير صحيحة');
+          setIsLoggingIn(false);
+          return;
+        }
+
+        const userData = querySnapshot.docs[0].data();
+        setUser({
+          ...userData,
+          id: querySnapshot.docs[0].id
+        } as any);
+        setLoading(false);
+        toast.success('تم تسجيل الدخول بنجاح');
+      }
     } catch (error: any) {
-      console.error('Sign in error:', error);
-      toast.error('حدث خطأ أثناء تسجيل الدخول: ' + (error.message || 'خطأ غير معروف'));
+      console.error('Auth error:', error);
+      toast.error('حدث خطأ أثناء العملية: ' + (error.message || 'خطأ غير معروف'));
     } finally {
       setIsLoggingIn(false);
     }
@@ -3492,7 +3546,20 @@ function AppContent() {
           <h1 className="text-2xl font-black text-gray-900 dark:text-white mb-2">{appName}</h1>
           <p className="text-gray-500 dark:text-slate-400 mb-8 text-sm">إدارة ذكية لطلبات النظافة في مجمعاتنا السكنية</p>
           
-          <form onSubmit={signIn} className="space-y-4">
+          <form onSubmit={handleAuth} className="space-y-4">
+            {isRegisterMode && (
+              <div className="text-right">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 mr-1">الاسم الكامل</label>
+                <input 
+                  type="text"
+                  value={loginForm.displayName}
+                  onChange={(e) => setLoginForm(prev => ({ ...prev, displayName: e.target.value }))}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary outline-none transition-all"
+                  placeholder="أدخل اسمك الكامل"
+                  required
+                />
+              </div>
+            )}
             <div className="text-right">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 mr-1">اسم المستخدم</label>
               <input 
@@ -3526,8 +3593,18 @@ function AppContent() {
                   transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
                   className="rounded-full h-5 w-5 border-2 border-white border-t-transparent"
                 />
-              ) : 'تسجيل الدخول'}
+              ) : (isRegisterMode ? 'إنشاء حساب جديد' : 'تسجيل الدخول')}
             </button>
+
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => setIsRegisterMode(!isRegisterMode)}
+                className="text-primary hover:text-primary/80 text-sm font-bold transition-colors"
+              >
+                {isRegisterMode ? 'لديك حساب بالفعل؟ سجل دخولك' : 'ليس لديك حساب؟ سجل الآن'}
+              </button>
+            </div>
           </form>
         </motion.div>
       </div>
