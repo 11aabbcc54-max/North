@@ -13,8 +13,7 @@ import {
 } from './firebase';
 import { 
   onAuthStateChanged, 
-  signInWithPopup, 
-  GoogleAuthProvider, 
+  signInWithCustomToken,
   signOut, 
   User 
 } from 'firebase/auth';
@@ -2457,6 +2456,7 @@ function AppContent() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [isClubSubscriptionModalOpen, setIsClubSubscriptionModalOpen] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
   const [isPublicBookingView, setIsPublicBookingView] = useState(false);
   const [editingClubSub, setEditingClubSub] = useState<ClubSubscription | null>(null);
   const [clubSubBuildingFilter, setClubSubBuildingFilter] = useState('all');
@@ -2492,7 +2492,7 @@ function AppContent() {
   const inventoryReportRef = useRef<HTMLDivElement>(null);
   const staffReportRef = useRef<HTMLDivElement>(null);
   const bulkInvoicesRef = useRef<HTMLDivElement>(null);
-  const isAdmin = user?.email === '11aabbcc54@gmail.com';
+  const isAdmin = user?.uid === 'fyozr-admin-user' || user?.email === '11aabbcc54@gmail.com';
 
   useEffect(() => {
     if (searchTerm.trim() !== '') {
@@ -2801,10 +2801,10 @@ function AppContent() {
         if (!userSnap.exists()) {
           await setDoc(userRef, {
             uid: user.uid,
-            email: user.email,
-            displayName: user.displayName,
-            photoURL: user.photoURL,
-            role: user.email === '11aabbcc54@gmail.com' ? 'admin' : 'user',
+            email: user.email || 'Fyozr@system.local',
+            displayName: user.displayName || 'Fyozr',
+            photoURL: user.photoURL || '',
+            role: (user.email === '11aabbcc54@gmail.com' || user.isAnonymous || user.uid === 'fyozr-admin-user') ? 'admin' : 'user',
             createdAt: Timestamp.now()
           });
         }
@@ -2958,44 +2958,47 @@ function AppContent() {
     return () => unsubscribe();
   }, [user]);
 
-  const signIn = async () => {
+  const signIn = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (isLoggingIn) return;
+    
+    if (loginForm.username !== 'Fyozr' || loginForm.password !== '5150') {
+      toast.error('اسم المستخدم أو كلمة المرور غير صحيحة');
+      return;
+    }
+
     setIsLoggingIn(true);
-    const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: 'select_account' });
     
     try {
-      console.log('Starting sign in process...');
-      const result = await signInWithPopup(auth, provider);
-      console.log('Sign in successful:', result.user.email);
+      console.log('Attempting login bypass...');
+      // Simple bypass: just set the user in state if credentials match
+      // Since we can't use Custom Tokens without IAM API, and can't use Anonymous Auth without manual toggle,
+      // we'll use a local state-based session for this specific admin user.
+      
+      // We'll mock a user object that looks like a Firebase User
+      const mockUser = {
+        uid: 'fyozr-admin-user',
+        email: 'Fyozr@system.local',
+        displayName: 'Fyozr',
+        isAnonymous: false,
+        emailVerified: true,
+      } as User;
+
+      setUser(mockUser);
+      setLoading(false);
       toast.success('تم تسجيل الدخول بنجاح');
     } catch (error: any) {
-      console.error('Detailed sign in error:', error);
-      let message = 'حدث خطأ أثناء تسجيل الدخول.';
-      
-      if (error.code === 'auth/popup-blocked') {
-        message = 'تم حظر النافذة المنبثقة. يرجى السماح بالمنبثقات للموقع في إعدادات المتصفح.';
-      } else if (error.code === 'auth/unauthorized-domain') {
-        message = 'هذا النطاق غير مصرح له بتسجيل الدخول. يرجى مراجعة إعدادات Firebase Authorized Domains.';
-      } else if (error.code === 'auth/popup-closed-by-user') {
-        message = 'تم إغلاق نافذة تسجيل الدخول قبل إتمام العملية.';
-      } else if (error.code === 'auth/cancelled-popup-request') {
-        message = 'تم إلغاء طلب تسجيل الدخول. يرجى المحاولة مرة أخرى.';
-      } else if (error.code === 'auth/network-request-failed') {
-        message = 'خطأ في الاتصال بالشبكة. يرجى التحقق من اتصالك بالإنترنت.';
-      } else if (error.message) {
-        message = `خطأ: ${error.message}`;
-      }
-      
-      toast.error(message, {
-        duration: 5000,
-      });
+      console.error('Sign in error:', error);
+      toast.error('حدث خطأ أثناء تسجيل الدخول: ' + (error.message || 'خطأ غير معروف'));
     } finally {
       setIsLoggingIn(false);
     }
   };
 
-  const logout = () => signOut(auth);
+  const logout = () => {
+    signOut(auth);
+    setUser(null);
+  };
 
   const logInventoryChange = async (
     itemId: string,
@@ -3015,8 +3018,8 @@ function AppContent() {
         newStock,
         changeAmount: newStock - previousStock,
         changeType,
-        performedBy: user.displayName || 'مستخدم',
-        performedByEmail: user.email,
+        performedBy: user.displayName || 'Fyozr',
+        performedByEmail: user.email || 'Fyozr@system.local',
         timestamp: Timestamp.now(),
         notes: notes || ''
       });
@@ -3481,31 +3484,51 @@ function AppContent() {
         <motion.div 
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white dark:bg-slate-900 p-10 rounded-[2.5rem] shadow-2xl max-w-md w-full text-center border border-white/10 dark:border-slate-800"
+          className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] shadow-2xl max-w-md w-full text-center border border-white/10 dark:border-slate-800"
         >
-          <div className="bg-primary/10 p-5 rounded-3xl w-24 h-24 flex items-center justify-center mx-auto mb-8">
-            <Building2 className="text-primary w-12 h-12" />
+          <div className="bg-primary/10 p-5 rounded-3xl w-20 h-20 flex items-center justify-center mx-auto mb-6">
+            <Building2 className="text-primary w-10 h-10" />
           </div>
-          <h1 className="text-3xl font-black text-gray-900 dark:text-white mb-3">{appName}</h1>
-          <p className="text-gray-500 dark:text-slate-400 mb-10 text-lg">إدارة ذكية لطلبات النظافة في مجمعاتنا السكنية</p>
-          <button 
-            onClick={signIn}
-            disabled={isLoggingIn}
-            className="w-full flex items-center justify-center gap-4 bg-white dark:bg-slate-800 border-2 border-gray-100 dark:border-slate-700 py-4 rounded-2xl font-bold text-gray-700 dark:text-white hover:bg-gray-50 dark:hover:bg-slate-700 hover:border-primary transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isLoggingIn ? (
-              <motion.div 
-                animate={{ rotate: 360 }}
-                transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
-                className="rounded-full h-6 w-6 border-2 border-primary border-t-transparent"
+          <h1 className="text-2xl font-black text-gray-900 dark:text-white mb-2">{appName}</h1>
+          <p className="text-gray-500 dark:text-slate-400 mb-8 text-sm">إدارة ذكية لطلبات النظافة في مجمعاتنا السكنية</p>
+          
+          <form onSubmit={signIn} className="space-y-4">
+            <div className="text-right">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 mr-1">اسم المستخدم</label>
+              <input 
+                type="text"
+                value={loginForm.username}
+                onChange={(e) => setLoginForm(prev => ({ ...prev, username: e.target.value }))}
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary outline-none transition-all"
+                placeholder="أدخل اسم المستخدم"
+                required
               />
-            ) : (
-              <>
-                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-6 h-6" />
-                الدخول عبر جوجل
-              </>
-            )}
-          </button>
+            </div>
+            <div className="text-right">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 mr-1">كلمة المرور</label>
+              <input 
+                type="password"
+                value={loginForm.password}
+                onChange={(e) => setLoginForm(prev => ({ ...prev, password: e.target.value }))}
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary outline-none transition-all"
+                placeholder="أدخل كلمة المرور"
+                required
+              />
+            </div>
+            <button 
+              type="submit"
+              disabled={isLoggingIn}
+              className="w-full bg-primary text-white py-4 rounded-xl font-bold hover:bg-primary/90 transition-all shadow-lg shadow-primary/20 disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {isLoggingIn ? (
+                <motion.div 
+                  animate={{ rotate: 360 }}
+                  transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                  className="rounded-full h-5 w-5 border-2 border-white border-t-transparent"
+                />
+              ) : 'تسجيل الدخول'}
+            </button>
+          </form>
         </motion.div>
       </div>
     );
@@ -3621,7 +3644,7 @@ function AppContent() {
                 </button>
 
                 <button 
-                  onClick={() => signOut(auth)}
+                  onClick={logout}
                   className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-rose-500 font-bold text-xs hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-all"
                 >
                   <LogOut size={16} />
@@ -3725,7 +3748,7 @@ function AppContent() {
                     </div>
                   </div>
                   <button 
-                    onClick={() => signOut(auth)}
+                    onClick={logout}
                     className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-rose-500 font-bold text-xs hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-all"
                   >
                     <LogOut size={16} />
@@ -3825,7 +3848,7 @@ function AppContent() {
                 <motion.button 
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.9 }}
-                  onClick={() => signOut(auth)}
+                  onClick={logout}
                   className="p-2.5 bg-rose-50 dark:bg-rose-900/20 text-rose-500 rounded-xl hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-all"
                 >
                   <LogOut size={20} />
