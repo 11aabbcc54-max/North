@@ -24,7 +24,82 @@ service cloud.firestore {
     //   - status: string (required, ['pending', 'in-progress', 'completed'])
     //   - paymentStatus: string (required, ['unpaid', 'paid'])
     //   - notes: string (optional)
+    //   - waterGallons: number (optional)
     //   - receiptUrl: string (optional)
+    //   - createdAt: timestamp (required)
+    //   - isRecurring: bool (optional)
+    //   - selectedMonths: list (optional)
+    //
+    // Collection: /inventory/{itemId}
+    // Fields:
+    //   - itemName: string (required)
+    //   - category: string (required)
+    //   - currentStock: number (required)
+    //   - reorderPoint: number (required)
+    //   - unit: string (required)
+    //   - lastUpdated: timestamp (required)
+    //
+    // Collection: /inventoryLogs/{logId}
+    // Fields:
+    //   - itemId: string (required)
+    //   - itemName: string (required)
+    //   - previousStock: number (required)
+    //   - newStock: number (required)
+    //   - changeAmount: number (required)
+    //   - changeType: string (required, ['manual', 'order', 'restock', 'delete'])
+    //   - performedBy: string (required)
+    //   - performedByEmail: string (required)
+    //   - timestamp: timestamp (required)
+    //   - notes: string (optional)
+    //
+    // Collection: /buildings/{buildingId}
+    // Fields:
+    //   - name: string (required)
+    //   - address: string (optional)
+    //   - order: number (required)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: /apartments/{apartmentId}
+    // Fields:
+    //   - buildingId: string (required)
+    //   - number: string (required)
+    //   - type: string (optional)
+    //   - status: string (required, ['vacant', 'occupied'])
+    //   - currentTenant: string (optional)
+    //
+    // Collection: /contracts/{contractId}
+    // Fields:
+    //   - apartmentId: string (required)
+    //   - tenantName: string (required)
+    //   - tenantPhone: string (optional)
+    //   - startDate: timestamp (required)
+    //   - endDate: timestamp (required)
+    //   - totalAmount: number (required)
+    //   - paymentFrequency: string (optional, ['monthly', 'quarterly', 'yearly'])
+    //   - status: string (required, ['active', 'archived'])
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: /rentPayments/{paymentId}
+    // Fields:
+    //   - contractId: string (required)
+    //   - amount: number (required)
+    //   - dueDate: timestamp (required)
+    //   - paymentDate: timestamp (optional)
+    //   - status: string (required, ['unpaid', 'paid', 'overdue'])
+    //   - notes: string (optional)
+    //
+    // Collection: /clubSubscriptions/{subId}
+    // Fields:
+    //   - userId: string (required)
+    //   - name: string (required)
+    //   - workplace: string (required)
+    //   - monthsCount: number (required)
+    //   - totalPrice: number (required)
+    //   - startDate: timestamp (required)
+    //   - endDate: timestamp (required)
+    //   - idPhotoUrl: string (optional)
+    //   - status: string (required, ['active', 'expired', 'locked'])
+    //   - paymentStatus: string (required, ['unpaid', 'paid'])
     //   - createdAt: timestamp (required)
     //
     // ===============================================================
@@ -49,11 +124,16 @@ service cloud.firestore {
       return data.keys().hasAll(['uid', 'email']) &&
              data.uid is string &&
              data.email is string &&
-             data.email.size() < 150;
+             data.email.size() < 150 &&
+             (!('role' in data) || data.role in ['admin', 'user']) &&
+             (!('displayName' in data) || data.displayName is string) &&
+             (!('photoURL' in data) || data.photoURL is string) &&
+             (!('createdAt' in data) || data.createdAt is timestamp);
     }
 
     function isValidRequest(data) {
-      return data.keys().hasAll(['userId', 'buildingName', 'apartmentNumber', 'serviceType', 'date', 'monthsCount', 'price', 'status', 'paymentStatus', 'createdAt']) &&
+      let requiredFields = ['userId', 'buildingName', 'apartmentNumber', 'serviceType', 'date', 'monthsCount', 'price', 'status', 'paymentStatus', 'createdAt'];
+      return data.keys().hasAll(requiredFields) &&
              data.userId is string &&
              data.buildingName is string && data.buildingName.size() < 100 &&
              data.apartmentNumber is string && data.apartmentNumber.size() < 100 &&
@@ -63,22 +143,182 @@ service cloud.firestore {
              data.price is number && data.price >= 0 &&
              data.status in ['pending', 'in-progress', 'completed'] &&
              data.paymentStatus in ['unpaid', 'paid'] &&
+             (!('notes' in data) || data.notes is string) &&
+             (!('waterGallons' in data) || data.waterGallons is number) &&
              (!('receiptUrl' in data) || data.receiptUrl is string) &&
+             (!('isRecurring' in data) || data.isRecurring is bool) &&
+             (!('selectedMonths' in data) || data.selectedMonths is list) &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidInventoryItem(data) {
+      let requiredFields = ['itemName', 'category', 'currentStock', 'reorderPoint', 'unit', 'lastUpdated'];
+      return data.keys().hasAll(requiredFields) &&
+             data.itemName is string &&
+             data.category is string &&
+             data.currentStock is number &&
+             data.reorderPoint is number &&
+             data.unit is string &&
+             data.lastUpdated is timestamp;
+    }
+
+    function isValidInventoryLog(data) {
+      let requiredFields = ['itemId', 'itemName', 'previousStock', 'newStock', 'changeAmount', 'changeType', 'performedBy', 'performedByEmail', 'timestamp'];
+      return data.keys().hasAll(requiredFields) &&
+             data.itemId is string &&
+             data.itemName is string &&
+             data.previousStock is number &&
+             data.newStock is number &&
+             data.changeAmount is number &&
+             data.changeType in ['manual', 'order', 'restock', 'delete'] &&
+             data.performedBy is string &&
+             data.performedByEmail is string &&
+             data.timestamp is timestamp &&
+             (!('notes' in data) || data.notes is string);
+    }
+
+    function isValidSettings(data) {
+      let allowedFields = ['name', 'logo', 'background', 'themeColor', 'bgOpacity', 'updatedAt'];
+      return data.keys().hasOnly(allowedFields) &&
+             (!('name' in data) || (data.name is string && data.name.size() < 100)) &&
+             (!('logo' in data) || (data.logo is string && data.logo.size() < 1500000)) &&
+             (!('background' in data) || (data.background is string && data.background.size() < 1500000)) &&
+             (!('themeColor' in data) || (data.themeColor is string)) &&
+             (!('bgOpacity' in data) || (data.bgOpacity is number)) &&
+             (!('updatedAt' in data) || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    function isValidBuilding(data) {
+      return data.keys().hasAll(['name', 'order', 'createdAt']) &&
+             data.name is string && data.name.size() < 100 &&
+             data.order is number &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidApartment(data) {
+      return data.keys().hasAll(['buildingId', 'number', 'status']) &&
+             data.buildingId is string &&
+             data.number is string &&
+             data.status in ['vacant', 'occupied'];
+    }
+
+    function isValidContract(data) {
+      return data.keys().hasAll(['apartmentId', 'tenantName', 'startDate', 'endDate', 'totalAmount', 'status', 'createdAt']) &&
+             data.apartmentId is string &&
+             data.tenantName is string &&
+             data.startDate is timestamp &&
+             data.endDate is timestamp &&
+             data.totalAmount is number &&
+             data.status in ['active', 'archived'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidPayment(data) {
+      return data.keys().hasAll(['contractId', 'amount', 'dueDate', 'status']) &&
+             data.contractId is string &&
+             data.amount is number &&
+             data.dueDate is timestamp &&
+             data.status in ['unpaid', 'paid', 'overdue'];
+    }
+
+    function isValidClubSubscription(data) {
+      let requiredFields = ['userId', 'name', 'workplace', 'monthsCount', 'totalPrice', 'startDate', 'endDate', 'status', 'paymentStatus', 'createdAt'];
+      return data.keys().hasAll(requiredFields) &&
+             data.userId is string &&
+             data.name is string && data.name.size() < 100 &&
+             data.workplace is string && data.workplace.size() < 100 &&
+             data.monthsCount is number &&
+             data.totalPrice is number &&
+             (!('collectedAmount' in data) || data.collectedAmount is number) &&
+             data.startDate is timestamp &&
+             data.endDate is timestamp &&
+             data.status in ['active', 'expired', 'locked'] &&
+             data.paymentStatus in ['unpaid', 'paid'] &&
+             (!('idPhotoUrl' in data) || (data.idPhotoUrl is string && data.idPhotoUrl.size() < 1500000)) &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidBooking(data) {
+      let requiredFields = ['buildingName', 'apartmentNumber', 'serviceType', 'date', 'time', 'status', 'createdAt'];
+      return data.keys().hasAll(requiredFields) &&
+             data.buildingName is string &&
+             data.apartmentNumber is string &&
+             data.serviceType is string &&
+             data.date is timestamp &&
+             data.time is string &&
+             data.status in ['pending', 'confirmed', 'cancelled'] &&
+             (!('customerName' in data) || data.customerName is string) &&
+             (!('customerPhone' in data) || data.customerPhone is string) &&
+             (!('language' in data) || data.language in ['ar', 'en']) &&
              data.createdAt is timestamp;
     }
 
     // Rules
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
-      allow create: if isOwner(userId) && isValidUser(request.resource.data);
-      allow update: if isOwner(userId) && isValidUser(request.resource.data);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && 
+                      (!('role' in request.resource.data) || request.resource.data.role == 'user' || isAdmin());
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                      (!('role' in request.resource.data) || request.resource.data.role == resource.data.role || isAdmin());
     }
 
     match /requests/{requestId} {
-      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isAuthenticated() && (request.resource.data.userId == request.auth.uid || isAdmin()) && isValidRequest(request.resource.data);
-      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin()) && isValidRequest(request.resource.data);
-      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidRequest(request.resource.data);
+      allow update: if isAuthenticated() && isValidRequest(request.resource.data);
+      allow delete: if isAuthenticated();
+    }
+
+    match /inventory/{itemId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() && isValidInventoryItem(request.resource.data);
+    }
+
+    match /inventoryLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated() && isValidInventoryLog(request.resource.data);
+      allow update, delete: if isAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() && isValidSettings(request.resource.data);
+    }
+
+    match /buildings/{buildingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() && isValidBuilding(request.resource.data);
+    }
+
+    match /apartments/{apartmentId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() && isValidApartment(request.resource.data);
+    }
+
+    match /contracts/{contractId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() && isValidContract(request.resource.data);
+    }
+
+    match /rentPayments/{paymentId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() && isValidPayment(request.resource.data);
+    }
+
+    match /clubSubscriptions/{subId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidClubSubscription(request.resource.data) && 
+                      (request.resource.data.userId == request.auth.uid || isAdmin());
+      allow update: if isAuthenticated() && isValidClubSubscription(request.resource.data) && 
+                      request.resource.data.userId == resource.data.userId &&
+                      (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /bookings/{bookingId} {
+      allow read: if isAdmin();
+      allow create: if isValidBooking(request.resource.data);
+      allow update, delete: if isAdmin();
     }
   }
 }

@@ -27,10 +27,150 @@
         "status": { "type": "string", "enum": ["pending", "completed"] },
         "paymentStatus": { "type": "string", "enum": ["unpaid", "paid"] },
         "notes": { "type": "string" },
+        "waterGallons": { "type": "integer" },
         "receiptUrl": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "buildingName", "apartmentNumber", "serviceType", "date", "monthsCount", "price", "status", "paymentStatus"]
+    },
+    "Inventory": {
+      "title": "Inventory Item",
+      "description": "Details of an inventory item",
+      "type": "object",
+      "properties": {
+        "itemName": { "type": "string" },
+        "category": { "type": "string" },
+        "currentStock": { "type": "integer" },
+        "reorderPoint": { "type": "integer" },
+        "unit": { "type": "string" },
+        "lastUpdated": { "type": "string", "format": "date-time" }
+      },
+      "required": ["itemName", "category", "currentStock", "reorderPoint", "unit", "lastUpdated"]
+    },
+    "InventoryLog": {
+      "title": "Inventory Log",
+      "description": "Log of changes to inventory",
+      "type": "object",
+      "properties": {
+        "itemId": { "type": "string" },
+        "itemName": { "type": "string" },
+        "previousStock": { "type": "integer" },
+        "newStock": { "type": "integer" },
+        "changeAmount": { "type": "integer" },
+        "changeType": { "type": "string", "enum": ["manual", "order", "restock", "delete"] },
+        "performedBy": { "type": "string" },
+        "performedByEmail": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "notes": { "type": "string" }
+      },
+      "required": ["itemId", "itemName", "previousStock", "newStock", "changeAmount", "changeType", "performedBy", "performedByEmail", "timestamp"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "Application settings like branding",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "logo": { "type": "string" },
+        "background": { "type": "string" },
+        "themeColor": { "type": "string" },
+        "bgOpacity": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "RealEstateBuilding": {
+      "title": "Real Estate Building",
+      "description": "Details of a building in the real estate management section",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "order": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "order"]
+    },
+    "RealEstateApartment": {
+      "title": "Real Estate Apartment",
+      "description": "Details of an apartment within a building",
+      "type": "object",
+      "properties": {
+        "buildingId": { "type": "string" },
+        "number": { "type": "string" },
+        "type": { "type": "string" },
+        "status": { "type": "string", "enum": ["vacant", "occupied"] },
+        "currentTenant": { "type": "string" }
+      },
+      "required": ["buildingId", "number", "status"]
+    },
+    "RealEstateContract": {
+      "title": "Real Estate Contract",
+      "description": "Rental contract for an apartment",
+      "type": "object",
+      "properties": {
+        "apartmentId": { "type": "string" },
+        "tenantName": { "type": "string" },
+        "tenantPhone": { "type": "string" },
+        "startDate": { "type": "string", "format": "date-time" },
+        "endDate": { "type": "string", "format": "date-time" },
+        "totalAmount": { "type": "number" },
+        "paymentFrequency": { "type": "string", "enum": ["monthly", "quarterly", "yearly"] },
+        "status": { "type": "string", "enum": ["active", "archived"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["apartmentId", "tenantName", "startDate", "endDate", "totalAmount", "status"]
+    },
+    "RealEstatePayment": {
+      "title": "Real Estate Payment",
+      "description": "Rent payment record",
+      "type": "object",
+      "properties": {
+        "contractId": { "type": "string" },
+        "amount": { "type": "number" },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "paymentDate": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["unpaid", "paid", "overdue"] },
+        "notes": { "type": "string" }
+      },
+      "required": ["contractId", "amount", "dueDate", "status"]
+    },
+    "ClubSubscription": {
+      "title": "Club Subscription",
+      "description": "Details of a club membership subscription",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "workplace": { "type": "string" },
+        "monthsCount": { "type": "integer" },
+        "totalPrice": { "type": "number" },
+        "collectedAmount": { "type": "number" },
+        "startDate": { "type": "string", "format": "date-time" },
+        "endDate": { "type": "string", "format": "date-time" },
+        "idPhotoUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "expired", "locked"] },
+        "paymentStatus": { "type": "string", "enum": ["unpaid", "paid"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "workplace", "monthsCount", "totalPrice", "startDate", "endDate", "status", "paymentStatus", "createdAt"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "Customer booking for cleaning services",
+      "type": "object",
+      "properties": {
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "buildingName": { "type": "string" },
+        "apartmentNumber": { "type": "string" },
+        "serviceType": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "time": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "cancelled"] },
+        "language": { "type": "string", "enum": ["ar", "en"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["buildingName", "apartmentNumber", "serviceType", "date", "time", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -41,6 +181,42 @@
     "/requests/{requestId}": {
       "schema": "CleaningRequest",
       "description": "Cleaning requests"
+    },
+    "/inventory/{itemId}": {
+      "schema": "Inventory",
+      "description": "Inventory items"
+    },
+    "/inventoryLogs/{logId}": {
+      "schema": "InventoryLog",
+      "description": "Inventory change logs"
+    },
+    "/settings/{settingId}": {
+      "schema": "Settings",
+      "description": "Application settings"
+    },
+    "/buildings/{buildingId}": {
+      "schema": "RealEstateBuilding",
+      "description": "Real estate buildings"
+    },
+    "/apartments/{apartmentId}": {
+      "schema": "RealEstateApartment",
+      "description": "Real estate apartments"
+    },
+    "/contracts/{contractId}": {
+      "schema": "RealEstateContract",
+      "description": "Rental contracts"
+    },
+    "/rentPayments/{paymentId}": {
+      "schema": "RealEstatePayment",
+      "description": "Rent payments"
+    },
+    "/clubSubscriptions/{subId}": {
+      "schema": "ClubSubscription",
+      "description": "Club memberships"
+    },
+    "/bookings/{bookingId}": {
+      "schema": "Booking",
+      "description": "Customer bookings"
     }
   }
 }
