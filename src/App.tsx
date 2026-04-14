@@ -86,7 +86,8 @@ import {
   Wrench,
   Globe,
   Users,
-  Ban
+  Ban,
+  Bell
 } from 'lucide-react';
 import { 
   format, 
@@ -192,8 +193,44 @@ interface Booking {
   createdAt: Timestamp;
 }
 
+interface Apartment {
+  id: string;
+  buildingId: string;
+  buildingName: string;
+  number: string;
+  status: 'occupied' | 'vacant' | 'maintenance';
+  roomType?: string;
+  tenantId?: string;
+}
+
+interface Tenant {
+  id: string;
+  name: string;
+  nationality: string;
+  phone: string;
+  company: string;
+  idNumber?: string;
+  internetRequest?: number;
+  duration?: string;
+  startDate: Timestamp;
+  endDate: Timestamp;
+  contractValue: number;
+  paymentFrequency: string;
+  paymentMethod: string;
+  nextPaymentDate: Timestamp;
+  apartmentId: string;
+}
+
 const BUILDINGS = [
   "نظافة نورث"
+];
+
+const PROPERTY_BUILDINGS = [
+  { id: 'b1', name: 'مبنى ١', apartments: ['101','102','103','104','105','106','107','108','109','110','111','112','113','114','115','116','117','118','119','120','121','122','123','124','125','126','127','128','129','131','132','133','134','135'] },
+  { id: 'b2', name: 'مبنى ٢', apartments: ['201','202','203','204','205','206','207','208','209','210','211','212','213','214','215','216','217','218','219','220','221','222','223','224','225','226','227','231','232','233'] },
+  { id: 'b3', name: 'مبنى ٣', apartments: ['311','312','313','314','315','316','317','318','319','321','322','323','324','325','326','327'] },
+  { id: 'b4', name: 'مبنى ٤', apartments: ['401','402','403','404','405','406','407','408','409','410','411','412','413','414','415','416','417','418','419','420','421','422','423','424','425','426','427','431','432','433'] },
+  { id: 'b5', name: 'مبنى ٥', apartments: ['501','502','503','504','505','506','507','508','509','510','511','512','513','514','515','516','517','518','519','520','521','522','523','524','525','526','527'] }
 ];
 
 const SERVICES = [
@@ -1797,6 +1834,299 @@ const InventoryModal: React.FC<{
   );
 };
 
+const FinancialDashboardModal = ({ isOpen, onClose, tenants, apartments }: any) => {
+  if (!isOpen) return null;
+
+  const totalAnnualValue = tenants.reduce((sum: number, t: any) => sum + (t.contractValue || 0), 0);
+  const avgContractValue = tenants.length > 0 ? totalAnnualValue / tenants.length : 0;
+  const occupancyRate = apartments.length > 0 ? (tenants.length / apartments.length) * 100 : 0;
+
+  // Company breakdown
+  const companies = tenants.reduce((acc: any, t: any) => {
+    acc[t.company] = (acc[t.company] || 0) + 1;
+    return acc;
+  }, {});
+
+  // Nationality breakdown
+  const nationalities = tenants.reduce((acc: any, t: any) => {
+    acc[t.nationality] = (acc[t.nationality] || 0) + 1;
+    return acc;
+  }, {});
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        onClick={onClose}
+        className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+      />
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        className="relative w-full max-w-4xl bg-white dark:bg-slate-900 rounded-[3rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+      >
+        <div className="p-8 border-b dark:border-slate-800 flex items-center justify-between bg-primary text-white">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center">
+              <DollarSign size={24} />
+            </div>
+            <div>
+              <h2 className="text-2xl font-black tracking-tight">لوحة المبالغ المالية</h2>
+              <p className="text-white/70 font-bold">نظرة عامة على الإيرادات والإحصائيات المالية</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-3 hover:bg-white/10 rounded-2xl transition-all">
+            <X size={24} />
+          </button>
+        </div>
+
+        <div className="p-8 overflow-y-auto space-y-8" dir="rtl">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="p-6 bg-emerald-50 dark:bg-emerald-900/10 rounded-3xl border border-emerald-100 dark:border-emerald-900/20">
+              <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase mb-2">إجمالي القيمة السنوية</p>
+              <h3 className="text-3xl font-black text-emerald-700 dark:text-emerald-300">{totalAnnualValue.toLocaleString()} ر.س</h3>
+            </div>
+            <div className="p-6 bg-blue-50 dark:bg-blue-900/10 rounded-3xl border border-blue-100 dark:border-blue-900/20">
+              <p className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase mb-2">متوسط قيمة العقد</p>
+              <h3 className="text-3xl font-black text-blue-700 dark:text-blue-300">{Math.round(avgContractValue).toLocaleString()} ر.س</h3>
+            </div>
+            <div className="p-6 bg-amber-50 dark:bg-amber-900/10 rounded-3xl border border-amber-100 dark:border-amber-900/20">
+              <p className="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase mb-2">نسبة الإشغال</p>
+              <h3 className="text-3xl font-black text-amber-700 dark:text-amber-300">{Math.round(occupancyRate)}%</h3>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="space-y-4">
+              <h4 className="text-lg font-black text-gray-900 dark:text-white flex items-center gap-2">
+                <Building2 size={20} className="text-primary" />
+                توزيع الشركات
+              </h4>
+              <div className="space-y-3">
+                {Object.entries(companies).sort((a: any, b: any) => b[1] - a[1]).map(([name, count]: any) => (
+                  <div key={name} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-slate-800/50 rounded-2xl">
+                    <span className="font-bold text-gray-700 dark:text-slate-300">{name}</span>
+                    <span className="font-black text-primary bg-white dark:bg-slate-800 px-3 py-1 rounded-lg shadow-sm">{count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <h4 className="text-lg font-black text-gray-900 dark:text-white flex items-center gap-2">
+                <Globe size={20} className="text-primary" />
+                توزيع الجنسيات
+              </h4>
+              <div className="space-y-3">
+                {Object.entries(nationalities).sort((a: any, b: any) => b[1] - a[1]).map(([name, count]: any) => (
+                  <div key={name} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-slate-800/50 rounded-2xl">
+                    <span className="font-bold text-gray-700 dark:text-slate-300">{name}</span>
+                    <span className="font-black text-primary bg-white dark:bg-slate-800 px-3 py-1 rounded-lg shadow-sm">{count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+const TenantModal = ({ isOpen, onClose, onSave, initialData, apartments }: any) => {
+  const [formData, setFormData] = useState<any>({
+    name: '',
+    nationality: '',
+    phone: '',
+    company: '',
+    idNumber: '',
+    contractValue: 0,
+    startDate: format(new Date(), 'yyyy-MM-dd'),
+    endDate: format(addDays(new Date(), 365), 'yyyy-MM-dd'),
+    nextPaymentDate: format(addDays(new Date(), 30), 'yyyy-MM-dd'),
+    paymentFrequency: 'monthly',
+    paymentMethod: 'cash',
+    apartmentId: ''
+  });
+
+  useEffect(() => {
+    if (initialData) {
+      setFormData({
+        ...initialData,
+        startDate: format(safeToDate(initialData.startDate), 'yyyy-MM-dd'),
+        endDate: format(safeToDate(initialData.endDate), 'yyyy-MM-dd'),
+        nextPaymentDate: format(safeToDate(initialData.nextPaymentDate), 'yyyy-MM-dd'),
+      });
+    }
+  }, [initialData]);
+
+  if (!isOpen) return null;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSave({
+      ...formData,
+      startDate: Timestamp.fromDate(new Date(formData.startDate)),
+      endDate: Timestamp.fromDate(new Date(formData.endDate)),
+      nextPaymentDate: Timestamp.fromDate(new Date(formData.nextPaymentDate)),
+      contractValue: Number(formData.contractValue)
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        onClick={onClose}
+        className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+      />
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-[3rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+      >
+        <div className="p-8 border-b dark:border-slate-800 flex items-center justify-between bg-primary text-white">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center">
+              <Users size={24} />
+            </div>
+            <div>
+              <h2 className="text-2xl font-black tracking-tight">{initialData ? 'تعديل بيانات المستأجر' : 'إضافة مستأجر جديد'}</h2>
+              <p className="text-white/70 font-bold">يرجى إدخال كافة تفاصيل العقد والمستأجر</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-3 hover:bg-white/10 rounded-2xl transition-all">
+            <X size={24} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-8 overflow-y-auto space-y-6" dir="rtl">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-1">اسم المستأجر</label>
+              <input 
+                required
+                className="w-full p-4 bg-gray-50 dark:bg-slate-800 border-none rounded-2xl focus:ring-2 focus:ring-primary text-sm font-bold transition-all"
+                value={formData.name}
+                onChange={e => setFormData({...formData, name: e.target.value})}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-1">الجنسية</label>
+              <input 
+                required
+                className="w-full p-4 bg-gray-50 dark:bg-slate-800 border-none rounded-2xl focus:ring-2 focus:ring-primary text-sm font-bold transition-all"
+                value={formData.nationality}
+                onChange={e => setFormData({...formData, nationality: e.target.value})}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-1">رقم الجوال</label>
+              <input 
+                required
+                className="w-full p-4 bg-gray-50 dark:bg-slate-800 border-none rounded-2xl focus:ring-2 focus:ring-primary text-sm font-bold transition-all"
+                value={formData.phone}
+                onChange={e => setFormData({...formData, phone: e.target.value})}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-1">رقم الهوية / الإقامة</label>
+              <input 
+                required
+                className="w-full p-4 bg-gray-50 dark:bg-slate-800 border-none rounded-2xl focus:ring-2 focus:ring-primary text-sm font-bold transition-all"
+                value={formData.idNumber}
+                onChange={e => setFormData({...formData, idNumber: e.target.value})}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-1">الشركة</label>
+              <input 
+                required
+                className="w-full p-4 bg-gray-50 dark:bg-slate-800 border-none rounded-2xl focus:ring-2 focus:ring-primary text-sm font-bold transition-all"
+                value={formData.company}
+                onChange={e => setFormData({...formData, company: e.target.value})}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-1">رقم الشقة</label>
+              <select 
+                required
+                disabled={!!initialData}
+                className="w-full p-4 bg-gray-50 dark:bg-slate-800 border-none rounded-2xl focus:ring-2 focus:ring-primary text-sm font-bold transition-all appearance-none"
+                value={formData.apartmentId}
+                onChange={e => setFormData({...formData, apartmentId: e.target.value})}
+              >
+                <option value="">اختر الشقة...</option>
+                {apartments.filter((a: any) => a.status === 'vacant' || a.id === initialData?.apartmentId).map((a: any) => (
+                  <option key={a.id} value={a.id}>{a.buildingName} - شقة {a.number}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="pt-6 border-t dark:border-slate-800">
+            <h4 className="text-sm font-black text-gray-900 dark:text-white mb-4">تفاصيل العقد والمالية</h4>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-1">القيمة السنوية</label>
+                <input 
+                  type="number"
+                  required
+                  className="w-full p-4 bg-gray-50 dark:bg-slate-800 border-none rounded-2xl focus:ring-2 focus:ring-primary text-sm font-bold transition-all"
+                  value={formData.contractValue}
+                  onChange={e => setFormData({...formData, contractValue: e.target.value})}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-1">بداية العقد</label>
+                <input 
+                  type="date"
+                  required
+                  className="w-full p-4 bg-gray-50 dark:bg-slate-800 border-none rounded-2xl focus:ring-2 focus:ring-primary text-sm font-bold transition-all"
+                  value={formData.startDate}
+                  onChange={e => setFormData({...formData, startDate: e.target.value})}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-1">نهاية العقد</label>
+                <input 
+                  type="date"
+                  required
+                  className="w-full p-4 bg-gray-50 dark:bg-slate-800 border-none rounded-2xl focus:ring-2 focus:ring-primary text-sm font-bold transition-all"
+                  value={formData.endDate}
+                  onChange={e => setFormData({...formData, endDate: e.target.value})}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-6 flex gap-4">
+            <motion.button 
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              type="submit"
+              className="flex-1 bg-primary text-white py-4 rounded-2xl font-black text-base shadow-xl shadow-primary/20 transition-all"
+            >
+              حفظ بيانات المستأجر
+            </motion.button>
+            <motion.button 
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              type="button"
+              onClick={onClose}
+              className="flex-1 bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-400 py-4 rounded-2xl font-black text-base transition-all"
+            >
+              إلغاء
+            </motion.button>
+          </div>
+        </form>
+      </motion.div>
+    </div>
+  );
+};
+
 const ExportModal = ({ isOpen, onClose, data }: { isOpen: boolean; onClose: () => void; data: any[] }) => {
   const [selectedFields, setSelectedFields] = useState<string[]>([
     'buildingName', 'apartmentNumber', 'serviceType', 'date', 'status', 'paymentStatus', 'price'
@@ -2450,6 +2780,22 @@ function AppContent() {
   const [loginForm, setLoginForm] = useState({ username: '', password: '', displayName: '' });
   const [loginMethod, setLoginMethod] = useState<'username' | 'phone'>('username');
   const [isPublicBookingView, setIsPublicBookingView] = useState(false);
+  const [apartments, setApartments] = useState<Apartment[]>([]);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [isFinancialDashboardOpen, setIsFinancialDashboardOpen] = useState(false);
+  const [isTenantModalOpen, setIsTenantModalOpen] = useState(false);
+  const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [tenantForm, setTenantForm] = useState<Partial<Tenant>>({
+    name: '',
+    nationality: '',
+    phone: '',
+    company: '',
+    idNumber: '',
+    contractValue: 0,
+    paymentFrequency: 'monthly',
+    paymentMethod: 'cash'
+  });
   const [editingClubSub, setEditingClubSub] = useState<ClubSubscription | null>(null);
   const [clubSubBuildingFilter, setClubSubBuildingFilter] = useState('all');
   const [newClubSub, setNewClubSub] = useState<Partial<ClubSubscription>>({
@@ -2497,10 +2843,11 @@ function AppContent() {
     { id: 'طلبات الصيانة', label: 'طلبات الصيانة', icon: Wrench },
     ...BUILDINGS.map(b => ({ id: b, label: b, icon: Home })),
     { id: 'تنظيف سيارات', label: 'تنظيف السيارات', icon: Car },
-    ...(isAdmin ? [
-      { id: 'users', label: 'إدارة المستخدمين', icon: Users },
-      { id: 'settings', label: 'إعدادات الهوية', icon: Settings }
-    ] : [])
+    { id: 'property-units', label: 'إدارة الوحدات', icon: Home },
+    { id: 'tenants', label: 'المستأجرون', icon: Users },
+    { id: 'property-alerts', label: 'تنبيهات العقود', icon: Bell },
+    { id: 'users', label: 'إدارة المستخدمين', icon: Users },
+    { id: 'settings', label: 'إعدادات الهوية', icon: Settings }
   ].filter(item => {
     if (isAdmin) return true;
     const userPerms = (user as any)?.permissions || [];
@@ -2540,6 +2887,26 @@ function AppContent() {
       handleFirestoreError(error, OperationType.GET, 'settings/branding');
     });
     return () => unsubscribe();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const unsubscribeApts = onSnapshot(collection(db, 'apartments'), (snapshot) => {
+      const apts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setApartments(apts);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'apartments');
+    });
+    const unsubscribeTenants = onSnapshot(collection(db, 'tenants'), (snapshot) => {
+      const t = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setTenants(t);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'tenants');
+    });
+    return () => {
+      unsubscribeApts();
+      unsubscribeTenants();
+    };
   }, [user]);
 
   const updateBranding = async (name: string, logo: string | null, background: string | null, color: string, opacity: number) => {
@@ -2935,8 +3302,37 @@ function AppContent() {
   }, [selectedMonth]);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
+    const savedUser = localStorage.getItem('fyozr_user');
+    if (savedUser) {
+      setUser(JSON.parse(savedUser));
+    }
+
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      if (u) {
+        try {
+          const userRef = doc(db, 'users', u.uid);
+          const userSnap = await getDoc(userRef);
+          if (userSnap.exists()) {
+            const userData = userSnap.data();
+            const fullUser = { ...u, ...userData, id: userSnap.id };
+            setUser(fullUser as any);
+            if (userData.role === 'admin') {
+              // Also save to localStorage for consistency if needed, 
+              // but Firebase Auth handles its own persistence.
+            }
+          } else {
+            setUser(u);
+          }
+        } catch (error) {
+          console.error("Error fetching user data:", error);
+          setUser(u);
+        }
+      } else {
+        const customUser = localStorage.getItem('fyozr_user');
+        if (!customUser) {
+          setUser(null);
+        }
+      }
       setLoading(false);
     });
     return () => unsubscribe();
@@ -2986,6 +3382,15 @@ function AppContent() {
     }
   };
 
+  const approveUser = async (userId: string) => {
+    try {
+      await updateDoc(doc(db, 'users', userId), { status: 'approved' });
+      toast.success('تم تفعيل الحساب بنجاح');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}`);
+    }
+  };
+
   const updateUserRole = async (userId: string, newRole: string) => {
     try {
       await updateDoc(doc(db, 'users', userId), { role: newRole });
@@ -2995,9 +3400,10 @@ function AppContent() {
     }
   };
 
-  const toggleUserPermission = async (userId: string, permissionId: string, currentPermissions: string[] = []) => {
+  const toggleUserPermission = async (userId: string, permissionId: string, currentPermissions: any) => {
     try {
-      let newPermissions = [...currentPermissions];
+      const perms = Array.isArray(currentPermissions) ? currentPermissions : [];
+      let newPermissions = [...perms];
       if (newPermissions.includes(permissionId)) {
         newPermissions = newPermissions.filter(p => p !== permissionId);
       } else {
@@ -3058,6 +3464,206 @@ function AppContent() {
     }
   };
 
+  const initializePropertyData = async () => {
+    try {
+      const aptsRef = collection(db, 'apartments');
+      const tenantsRef = collection(db, 'tenants');
+      
+      const aptsSnap = await getDocs(aptsRef);
+      if (!aptsSnap.empty) {
+        toast.info('بيانات العقارات موجودة مسبقاً');
+        return;
+      }
+
+      toast.loading('جاري تهيئة بيانات العقارات...');
+
+      for (const b of PROPERTY_BUILDINGS) {
+        for (const num of b.apartments) {
+          const aptId = `${b.id}-${num}`;
+          const isTwoBedroom = ['105', '106', '110', '115', '116', '120', '125', '126', '129', '134', '135', '206', '210', '211', '221', '226', '227', '314', '315', '321', '325', '326', '327', '406', '410', '415', '416', '425', '426', '427', '501', '505', '511', '515', '521', '522'].includes(num);
+          
+          await setDoc(doc(db, 'apartments', aptId), {
+            buildingId: b.id,
+            buildingName: b.name,
+            number: num,
+            status: 'vacant',
+            roomType: isTwoBedroom ? 'غرفتين و صالة' : 'غرفة و صالة'
+          });
+        }
+      }
+      toast.success('تمت تهيئة بيانات العقارات بنجاح');
+    } catch (error) {
+      console.error(error);
+      toast.error('حدث خطأ أثناء تهيئة البيانات');
+    }
+  };
+
+  const getExpiringContracts = (days: number) => {
+    const now = new Date();
+    const limitDate = addDays(now, days);
+    return tenants.filter(t => {
+      const end = safeToDate(t.endDate);
+      return end >= now && end <= limitDate;
+    }).sort((a, b) => safeToDate(a.endDate).getTime() - safeToDate(b.endDate).getTime());
+  };
+
+  const deleteTenant = async (tenantId: string) => {
+    try {
+      const tenant = tenants.find(t => t.id === tenantId);
+      if (tenant) {
+        await updateDoc(doc(db, 'apartments', tenant.apartmentId), { status: 'vacant', tenantId: null });
+      }
+      await deleteDoc(doc(db, 'tenants', tenantId));
+      toast.success('تم حذف المستأجر بنجاح');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `tenants/${tenantId}`);
+    }
+  };
+
+  const saveTenant = async (data: Partial<Tenant>) => {
+    try {
+      if (editingTenant) {
+        await updateDoc(doc(db, 'tenants', editingTenant.id), data);
+        toast.success('تم تحديث بيانات المستأجر');
+      } else {
+        const docRef = await addDoc(collection(db, 'tenants'), data);
+        // Update apartment status
+        if (data.apartmentId) {
+          await updateDoc(doc(db, 'apartments', data.apartmentId), { 
+            status: 'occupied', 
+            tenantId: docRef.id 
+          });
+        }
+        toast.success('تم إضافة المستأجر بنجاح');
+      }
+      setIsTenantModalOpen(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'tenants');
+    }
+  };
+
+  const handleImportTenants = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const bstr = event.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws) as any[];
+
+        toast.loading('جاري استيراد البيانات...');
+
+        let importedCount = 0;
+        let errorCount = 0;
+
+        for (const row of data) {
+          try {
+            const name = row['الاسم'] || row['Name'];
+            const nationality = row['الجنسية'] || row['Nationality'] || '';
+            const phone = row['الهاتف'] || row['Phone'] || '';
+            const company = row['الشركة'] || row['Company'] || '';
+            const idNumber = String(row['رقم الهوية'] || row['ID Number'] || '');
+            const aptNumber = String(row['رقم الشقة'] || row['Apartment Number'] || '');
+            const buildingName = row['اسم المبنى'] || row['Building Name'] || '';
+            const contractValue = Number(row['قيمة العقد'] || row['Contract Value'] || 0);
+            const startDateStr = row['بداية العقد'] || row['Start Date'];
+            const endDateStr = row['نهاية العقد'] || row['End Date'];
+            const paymentFrequency = row['تكرار الدفع'] || row['Payment Frequency'] || 'monthly';
+            const paymentMethod = row['طريقة الدفع'] || row['Payment Method'] || 'cash';
+
+            if (!name || !aptNumber || !buildingName) continue;
+
+            const apt = apartments.find(a => a.number === aptNumber && a.buildingName === buildingName);
+            if (!apt) {
+              console.error(`Apartment ${aptNumber} in ${buildingName} not found`);
+              errorCount++;
+              continue;
+            }
+
+            const parseDate = (dateVal: any) => {
+              if (!dateVal) return Timestamp.now();
+              if (typeof dateVal === 'number') {
+                const date = new Date((dateVal - (25567 + 1)) * 86400 * 1000);
+                return Timestamp.fromDate(date);
+              }
+              const date = new Date(dateVal);
+              return isNaN(date.getTime()) ? Timestamp.now() : Timestamp.fromDate(date);
+            };
+
+            const startDate = parseDate(startDateStr);
+            const endDate = parseDate(endDateStr);
+
+            const tenantData: Omit<Tenant, 'id'> = {
+              name,
+              nationality,
+              phone,
+              company,
+              idNumber,
+              contractValue,
+              paymentFrequency,
+              paymentMethod,
+              startDate,
+              endDate,
+              nextPaymentDate: startDate,
+              apartmentId: apt.id
+            };
+
+            const tenantRef = await addDoc(collection(db, 'tenants'), tenantData);
+            await updateDoc(doc(db, 'apartments', apt.id), {
+              status: 'occupied',
+              tenantId: tenantRef.id
+            });
+
+            importedCount++;
+          } catch (err) {
+            console.error('Error importing row:', row, err);
+            errorCount++;
+          }
+        }
+
+        toast.dismiss();
+        if (importedCount > 0) {
+          toast.success(`تم استيراد ${importedCount} مستأجر بنجاح`);
+        }
+        if (errorCount > 0) {
+          toast.error(`فشل استيراد ${errorCount} سجل`);
+        }
+      } catch (error) {
+        console.error(error);
+        toast.error('حدث خطأ أثناء قراءة الملف');
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = '';
+  };
+
+  const downloadTenantTemplate = () => {
+    const template = [
+      {
+        'الاسم': 'مثال: محمد احمد',
+        'الجنسية': 'سعودي',
+        'الهاتف': '0500000000',
+        'الشركة': 'شركة مثال',
+        'رقم الهوية': '1234567890',
+        'رقم الشقة': '101',
+        'اسم المبنى': 'مبنى ١',
+        'قيمة العقد': 25000,
+        'بداية العقد': '2024-01-01',
+        'نهاية العقد': '2024-12-31',
+        'تكرار الدفع': 'monthly',
+        'طريقة الدفع': 'cash'
+      }
+    ];
+    const ws = XLSX.utils.json_to_sheet(template);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Template");
+    XLSX.writeFile(wb, "tenants_template.xlsx");
+  };
+
   const handleAuth = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (isLoggingIn) return;
@@ -3097,14 +3703,15 @@ function AppContent() {
           password: password, // In a real app, hash this
           displayName: loginForm.displayName,
           email: `${username}@fyozr.local`,
-          role: 'admin', // Default to admin for now as per user request to "share the table"
+          role: 'user', // Changed from admin to user by default
+          status: 'pending', // New accounts are pending by default
           createdAt: Timestamp.now()
         };
 
         await addDoc(usersRef, newUser);
         setUser(newUser as any);
         setLoading(false);
-        toast.success('تم إنشاء الحساب وتسجيل الدخول بنجاح');
+        toast.success('تم إنشاء الحساب بنجاح. يرجى انتظار موافقة المسؤول لتفعيل الحساب.');
       } else {
         // Login Logic
         // Fallback for hardcoded admin
@@ -3136,6 +3743,10 @@ function AppContent() {
         }
 
         const userData = querySnapshot.docs[0].data();
+        const fullUser = {
+          ...userData,
+          id: querySnapshot.docs[0].id
+        };
         
         if (userData.isBlocked) {
           toast.error('هذا الحساب محظور من دخول الموقع. يرجى التواصل مع الإدارة.');
@@ -3143,10 +3754,14 @@ function AppContent() {
           return;
         }
 
-        setUser({
-          ...userData,
-          id: querySnapshot.docs[0].id
-        } as any);
+        if (userData.status === 'pending' && userData.role !== 'admin' && username !== 'fyozr') {
+          toast.error('حسابك قيد المراجعة. يرجى انتظار موافقة المسؤول.');
+          setIsLoggingIn(false);
+          return;
+        }
+
+        setUser(fullUser as any);
+        localStorage.setItem('fyozr_user', JSON.stringify(fullUser));
         setLoading(false);
         toast.success('تم تسجيل الدخول بنجاح');
       }
@@ -3161,6 +3776,7 @@ function AppContent() {
   const logout = () => {
     signOut(auth);
     setUser(null);
+    localStorage.removeItem('fyozr_user');
   };
 
   const logInventoryChange = async (
@@ -3808,7 +4424,13 @@ function AppContent() {
                 key={item.id}
                 whileHover={{ x: -8, scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                onClick={() => setActiveTab(item.id)}
+                onClick={() => {
+                  if (item.id === 'settings') {
+                    setIsBrandingModalOpen(true);
+                  } else {
+                    setActiveTab(item.id);
+                  }
+                }}
                 className={cn(
                   "w-full flex items-center gap-4 px-5 py-4 rounded-[1.5rem] font-cairo font-bold text-sm transition-all duration-300",
                   activeTab === item.id
@@ -5801,13 +6423,24 @@ function AppContent() {
                           <td className="px-6 py-5">
                             <span className={cn(
                               "px-3 py-1 rounded-full text-[10px] font-black",
-                              u.isBlocked ? "bg-rose-100 text-rose-600" : "bg-emerald-100 text-emerald-600"
+                              u.isBlocked ? "bg-rose-100 text-rose-600" : 
+                              u.status === 'pending' ? "bg-amber-100 text-amber-600" :
+                              "bg-emerald-100 text-emerald-600"
                             )}>
-                              {u.isBlocked ? 'محظور' : 'نشط'}
+                              {u.isBlocked ? 'محظور' : u.status === 'pending' ? 'قيد الانتظار' : 'نشط'}
                             </span>
                           </td>
                           <td className="px-6 py-5 rounded-l-3xl">
                             <div className="flex items-center gap-2">
+                              {u.status === 'pending' && (
+                                <button 
+                                  onClick={() => approveUser(u.id)}
+                                  className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-xl text-[10px] font-black shadow-lg shadow-emerald-200 transition-all"
+                                >
+                                  <Check size={14} />
+                                  تفعيل الحساب
+                                </button>
+                              )}
                               <button 
                                 onClick={() => toggleUserBlock(u.id, !!u.isBlocked)}
                                 className={cn(
@@ -6418,6 +7051,398 @@ function AppContent() {
                       <Car size={48} className="mx-auto text-gray-300 mb-4" />
                       <h3 className="text-lg font-black text-gray-400">لا توجد سيارات مجدولة للغسيل في هذا اليوم</h3>
                       <p className="text-sm text-gray-400 font-bold mt-1">سيظهر جدول العمل هنا بمجرد إضافة طلبات جديدة</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Property Management Tabs */}
+          {activeTab === 'property-units' && (
+            <div className="space-y-8 mb-10">
+              <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-8 border border-gray-100 dark:border-slate-800 shadow-sm">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+                  <div className="flex items-center gap-5">
+                    <div className="w-14 h-14 bg-primary rounded-2xl flex items-center justify-center shadow-lg shadow-primary/20 dark:shadow-none">
+                      <Home className="text-white" size={28} />
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">
+                        إدارة الوحدات السكنية
+                      </h2>
+                      <p className="text-gray-500 dark:text-slate-400 font-bold mt-1">متابعة حالة الشقق والمستأجرين في جميع المباني</p>
+                    </div>
+                  </div>
+
+                  {apartments.length === 0 && isAdmin && (
+                    <button 
+                      onClick={initializePropertyData}
+                      className="px-6 py-3 bg-primary text-white rounded-2xl font-black text-sm shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all"
+                    >
+                      تهيئة بيانات العقارات
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                  {PROPERTY_BUILDINGS.map(b => {
+                    const buildingApts = apartments.filter(a => a.buildingId === b.id);
+                    const occupiedCount = buildingApts.filter(a => a.status === 'occupied').length;
+                    const vacantCount = buildingApts.filter(a => a.status === 'vacant').length;
+                    const maintenanceCount = buildingApts.filter(a => a.status === 'maintenance').length;
+                    const occupancyRate = buildingApts.length > 0 ? Math.round((occupiedCount / buildingApts.length) * 100) : 0;
+
+                    return (
+                      <motion.div 
+                        key={b.id}
+                        whileHover={{ y: -5 }}
+                        className="bg-gray-50 dark:bg-slate-800/50 rounded-[2.5rem] overflow-hidden border border-transparent hover:border-primary/30 transition-all"
+                      >
+                        <div className="bg-gradient-to-br from-primary to-primary-dark p-8 text-white">
+                          <h3 className="text-xl font-black mb-1">{b.name}</h3>
+                          <p className="text-xs font-bold opacity-80">{buildingApts.length} وحدة سكنية • إشغال {occupancyRate}%</p>
+                        </div>
+                        <div className="p-8">
+                          <div className="grid grid-cols-3 gap-4 mb-6">
+                            <div className="text-center">
+                              <div className="text-2xl font-black text-emerald-600">{occupiedCount}</div>
+                              <div className="text-[10px] font-bold text-gray-400 uppercase">مأهول</div>
+                            </div>
+                            <div className="text-center">
+                              <div className="text-2xl font-black text-amber-600">{vacantCount}</div>
+                              <div className="text-[10px] font-bold text-gray-400 uppercase">شاغر</div>
+                            </div>
+                            <div className="text-center">
+                              <div className="text-2xl font-black text-rose-600">{maintenanceCount}</div>
+                              <div className="text-[10px] font-bold text-gray-400 uppercase">صيانة</div>
+                            </div>
+                          </div>
+                          
+                          <div className="h-2 bg-gray-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                            <div className="h-full bg-primary" style={{ width: `${occupancyRate}%` }} />
+                          </div>
+
+                          <div className="mt-8 grid grid-cols-4 gap-2">
+                            {b.apartments.map(num => {
+                              const apt = apartments.find(a => a.buildingId === b.id && a.number === num);
+                              return (
+                                <div 
+                                  key={num}
+                                  className={cn(
+                                    "aspect-square rounded-xl flex items-center justify-center text-[10px] font-black border-2 transition-all cursor-pointer hover:scale-110",
+                                    apt?.status === 'occupied' ? "bg-primary/10 border-primary/30 text-primary" :
+                                    apt?.status === 'maintenance' ? "bg-rose-50 border-rose-200 text-rose-600" :
+                                    "bg-emerald-50 border-emerald-200 text-emerald-600"
+                                  )}
+                                  title={`شقة ${num} - ${apt?.status === 'occupied' ? 'مأهولة' : apt?.status === 'maintenance' ? 'صيانة' : 'شاغرة'}`}
+                                >
+                                  {num}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'tenants' && (
+            <div className="space-y-8 mb-10">
+              {/* Statistics Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+                {[
+                  { label: 'إجمالي الوحدات', value: apartments.length, icon: Home, color: 'primary' },
+                  { label: 'المؤجرة', value: tenants.length, icon: Users, color: 'emerald' },
+                  { label: 'الشاغرة', value: apartments.filter(a => a.status === 'vacant').length, icon: AlertCircle, color: 'amber' },
+                  { label: 'غرفة وصالة', value: apartments.filter(a => a.roomType === 'غرفة و صالة').length, icon: Layout, color: 'blue' },
+                  { label: 'غرفتين وصالة', value: apartments.filter(a => a.roomType === 'غرفتين و صالة').length, icon: LayoutDashboard, color: 'indigo' },
+                  { label: 'نسبة الإشغال', value: `${apartments.length > 0 ? Math.round((tenants.length / apartments.length) * 100) : 0}%`, icon: PieChart, color: 'rose' },
+                ].map((stat, i) => (
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.05 }}
+                    className="bg-white dark:bg-slate-900 p-5 rounded-[2rem] border border-gray-100 dark:border-slate-800 shadow-sm flex items-center gap-4"
+                  >
+                    <div className={cn(
+                      "w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg dark:shadow-none shrink-0",
+                      stat.color === 'primary' ? "bg-primary text-white shadow-primary/20" :
+                      stat.color === 'emerald' ? "bg-emerald-500 text-white shadow-emerald-200" :
+                      stat.color === 'amber' ? "bg-amber-500 text-white shadow-amber-200" :
+                      stat.color === 'blue' ? "bg-blue-500 text-white shadow-blue-200" :
+                      stat.color === 'indigo' ? "bg-indigo-500 text-white shadow-indigo-200" :
+                      "bg-rose-500 text-white shadow-rose-200"
+                    )}>
+                      <stat.icon size={24} />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-tight leading-none mb-1">{stat.label}</p>
+                      <h3 className="text-lg font-black text-gray-900 dark:text-white leading-none">{stat.value}</h3>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+
+              <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-8 border border-gray-100 dark:border-slate-800 shadow-sm">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+                  <div className="flex items-center gap-5">
+                    <div className="w-14 h-14 bg-primary rounded-2xl flex items-center justify-center shadow-lg shadow-primary/20 dark:shadow-none">
+                      <Users className="text-white" size={28} />
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">
+                        إدارة المستأجرين
+                      </h2>
+                      <p className="text-gray-500 dark:text-slate-400 font-bold mt-1">قائمة بجميع المستأجرين الحاليين وتفاصيل عقودهم</p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => downloadTenantTemplate()}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300 rounded-xl font-bold text-sm hover:bg-gray-200 transition-all"
+                    >
+                      <Download size={18} />
+                      نموذج الاستيراد
+                    </motion.button>
+
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-emerald-50 text-emerald-700 rounded-xl font-bold text-sm hover:bg-emerald-100 transition-all"
+                    >
+                      <Upload size={18} />
+                      استيراد مستأجرين
+                    </motion.button>
+                    <input 
+                      type="file" 
+                      ref={fileInputRef} 
+                      onChange={handleImportTenants} 
+                      accept=".xlsx, .xls, .csv" 
+                      className="hidden" 
+                    />
+
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => setIsFinancialDashboardOpen(true)}
+                      className="flex items-center gap-3 px-6 py-3 bg-blue-600 text-white rounded-2xl font-black text-sm shadow-xl shadow-blue-200 dark:shadow-none hover:bg-blue-700 transition-all"
+                    >
+                      <DollarSign size={20} />
+                      لوحة المبالغ المالية
+                    </motion.button>
+                    
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => {
+                        setEditingTenant(null);
+                        setTenantForm({
+                          name: '',
+                          nationality: '',
+                          phone: '',
+                          company: '',
+                          idNumber: '',
+                          contractValue: 0,
+                          paymentFrequency: 'monthly',
+                          paymentMethod: 'cash'
+                        });
+                        setIsTenantModalOpen(true);
+                      }}
+                      className="flex items-center gap-3 px-6 py-3 bg-primary text-white rounded-2xl font-black text-sm shadow-xl shadow-primary/20 dark:shadow-none hover:bg-primary/90 transition-all"
+                    >
+                      <Plus size={20} />
+                      إضافة مستأجر جديد
+                    </motion.button>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right border-separate border-spacing-y-3">
+                    <thead>
+                      <tr className="text-gray-400 text-[10px] font-black uppercase tracking-widest">
+                        <th className="px-4 py-4">المستأجر</th>
+                        <th className="px-4 py-4">الهوية</th>
+                        <th className="px-4 py-4">الوحدة</th>
+                        <th className="px-4 py-4">النوع</th>
+                        <th className="px-4 py-4">الشركة</th>
+                        <th className="px-4 py-4">بداية العقد</th>
+                        <th className="px-4 py-4">نهاية العقد</th>
+                        <th className="px-4 py-4">القيمة السنوية</th>
+                        <th className="px-4 py-4">الحالة</th>
+                        <th className="px-4 py-4">الإجراءات</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tenants.map((tenant) => {
+                        const apt = apartments.find(a => a.id === tenant.apartmentId);
+                        const building = PROPERTY_BUILDINGS.find(b => b.id === apt?.buildingId);
+                        const daysLeft = differenceInDays(safeToDate(tenant.endDate), new Date());
+                        const statusColor = daysLeft < 0 ? "text-rose-600 bg-rose-50" : daysLeft <= 30 ? "text-amber-600 bg-amber-50" : "text-emerald-600 bg-emerald-50";
+
+                        return (
+                          <motion.tr 
+                            key={tenant.id}
+                            initial={{ opacity: 0, x: 20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            className="bg-gray-50 dark:bg-slate-800/50 hover:bg-gray-100 dark:hover:bg-slate-800 transition-all group"
+                          >
+                            <td className="px-4 py-5 rounded-r-3xl">
+                              <div className="font-black text-gray-900 dark:text-white text-sm">{tenant.name}</div>
+                              <div className="text-[10px] font-bold text-gray-400">{tenant.nationality} • {tenant.phone}</div>
+                            </td>
+                            <td className="px-4 py-5 text-xs font-bold text-gray-600 dark:text-slate-400">
+                              {tenant.idNumber || '—'}
+                            </td>
+                            <td className="px-4 py-5">
+                              <div className="font-bold text-gray-700 dark:text-slate-300 text-xs">{building?.name || 'غير معروف'}</div>
+                              <div className="text-[10px] font-black text-primary">شقة {apt?.number || '??'}</div>
+                            </td>
+                            <td className="px-4 py-5 text-[10px] font-bold text-gray-500">
+                              {apt?.roomType || '—'}
+                            </td>
+                            <td className="px-4 py-5 font-bold text-gray-600 dark:text-slate-400 text-xs">
+                              {tenant.company}
+                            </td>
+                            <td className="px-4 py-5 text-[10px] font-bold text-gray-500">
+                              {format(safeToDate(tenant.startDate), 'yyyy/MM/dd')}
+                            </td>
+                            <td className="px-4 py-5 text-[10px] font-bold text-gray-500">
+                              {format(safeToDate(tenant.endDate), 'yyyy/MM/dd')}
+                            </td>
+                            <td className="px-4 py-5 font-black text-primary text-sm">
+                              {tenant.contractValue?.toLocaleString()} ر.س
+                            </td>
+                            <td className="px-4 py-5">
+                              <span className={cn("px-3 py-1.5 rounded-xl text-[9px] font-black whitespace-nowrap", statusColor)}>
+                                {daysLeft < 0 ? 'منتهي' : `${daysLeft} يوم متبقي`}
+                              </span>
+                            </td>
+                            <td className="px-4 py-5 rounded-l-3xl">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => {
+                                    setEditingTenant(tenant);
+                                    setTenantForm(tenant);
+                                    setIsTenantModalOpen(true);
+                                  }}
+                                  className="p-2 bg-white dark:bg-slate-800 text-gray-400 hover:text-primary rounded-xl transition-all border border-gray-100 dark:border-slate-700"
+                                >
+                                  <Pencil size={16} />
+                                </button>
+                                <button
+                                  onClick={() => deleteTenant(tenant.id)}
+                                  className="p-2 bg-white dark:bg-slate-800 text-gray-400 hover:text-rose-500 rounded-xl transition-all border border-gray-100 dark:border-slate-700"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            </td>
+                          </motion.tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {tenants.length === 0 && (
+                    <div className="py-20 text-center opacity-20">
+                      <Users size={48} className="mx-auto mb-3" />
+                      <p className="text-sm font-black">لا يوجد مستأجرون مسجلون حالياً</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'property-alerts' && (
+            <div className="space-y-8 mb-10">
+              <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-8 border border-gray-100 dark:border-slate-800 shadow-sm">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+                  <div className="flex items-center gap-5">
+                    <div className="w-14 h-14 bg-rose-500 rounded-2xl flex items-center justify-center shadow-lg shadow-rose-200 dark:shadow-none">
+                      <Bell className="text-white" size={28} />
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">
+                        تنبيهات العقود
+                      </h2>
+                      <p className="text-gray-500 dark:text-slate-400 font-bold mt-1">متابعة العقود التي قاربت على الانتهاء (خلال 30 يوم)</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {getExpiringContracts(30).map(tenant => {
+                    const apt = apartments.find(a => a.id === tenant.apartmentId);
+                    const building = PROPERTY_BUILDINGS.find(b => b.id === apt?.buildingId);
+                    const daysLeft = differenceInDays(safeToDate(tenant.endDate), new Date());
+                    const color = daysLeft < 0 ? "rose" : daysLeft <= 7 ? "rose" : "amber";
+
+                    return (
+                      <motion.div 
+                        key={tenant.id}
+                        whileHover={{ scale: 1.02 }}
+                        className={cn(
+                          "p-6 rounded-[2rem] border-2 flex flex-col gap-4 transition-all",
+                          color === 'rose' ? "bg-rose-50 border-rose-100 dark:bg-rose-900/10 dark:border-rose-900/20" : "bg-amber-50 border-amber-100 dark:bg-amber-900/10 dark:border-amber-900/20"
+                        )}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className={cn(
+                            "w-10 h-10 rounded-xl flex items-center justify-center",
+                            color === 'rose' ? "bg-rose-500 text-white" : "bg-amber-500 text-white"
+                          )}>
+                            <AlertCircle size={20} />
+                          </div>
+                          <span className={cn(
+                            "px-3 py-1 rounded-full text-[10px] font-black",
+                            color === 'rose' ? "bg-rose-100 text-rose-600" : "bg-amber-100 text-amber-600"
+                          )}>
+                            {daysLeft < 0 ? 'منتهي' : `${daysLeft} يوم متبقي`}
+                          </span>
+                        </div>
+                        
+                        <div>
+                          <h4 className="font-black text-gray-900 dark:text-white">{tenant.name}</h4>
+                          <p className="text-[10px] font-bold text-gray-400 mt-1">
+                            {building?.name} • شقة {apt?.number}
+                          </p>
+                        </div>
+
+                        <div className="pt-4 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between">
+                          <div className="text-[10px] font-bold text-gray-500">تاريخ الانتهاء:</div>
+                          <div className="text-xs font-black text-gray-700 dark:text-slate-300">
+                            {format(safeToDate(tenant.endDate), 'yyyy/MM/dd')}
+                          </div>
+                        </div>
+
+                        <button 
+                          onClick={() => window.open(`https://wa.me/${tenant.phone}?text=${encodeURIComponent(`عزيزي ${tenant.name}، نود تذكيركم بأن عقد إيجار الشقة رقم ${apt?.number} في ${building?.name} سينتهي بتاريخ ${format(safeToDate(tenant.endDate), 'yyyy/MM/dd')}. يرجى التواصل معنا للتجديد.`)}`, '_blank')}
+                          className={cn(
+                            "w-full py-3 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-2",
+                            color === 'rose' ? "bg-rose-500 text-white hover:bg-rose-600" : "bg-amber-500 text-white hover:bg-amber-600"
+                          )}
+                        >
+                          <MessageCircle size={16} />
+                          تذكير عبر واتساب
+                        </button>
+                      </motion.div>
+                    );
+                  })}
+
+                  {getExpiringContracts(30).length === 0 && (
+                    <div className="col-span-full py-20 text-center opacity-20">
+                      <Bell size={48} className="mx-auto mb-3" />
+                      <p className="text-sm font-black">لا توجد تنبيهات حالياً</p>
                     </div>
                   )}
                 </div>
@@ -7290,6 +8315,21 @@ function AppContent() {
         isOpen={isExportModalOpen}
         onClose={() => setIsExportModalOpen(false)}
         data={filteredRequests}
+      />
+
+      <FinancialDashboardModal 
+        isOpen={isFinancialDashboardOpen}
+        onClose={() => setIsFinancialDashboardOpen(false)}
+        tenants={tenants}
+        apartments={apartments}
+      />
+
+      <TenantModal 
+        isOpen={isTenantModalOpen}
+        onClose={() => setIsTenantModalOpen(false)}
+        onSave={saveTenant}
+        initialData={editingTenant}
+        apartments={apartments}
       />
 
       {/* History Modal */}

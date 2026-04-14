@@ -62,10 +62,20 @@ service cloud.firestore {
     // Collection: /apartments/{apartmentId}
     // Fields:
     //   - buildingId: string (required)
+    //   - buildingName: string (required)
     //   - number: string (required)
-    //   - type: string (optional)
-    //   - status: string (required, ['vacant', 'occupied'])
-    //   - currentTenant: string (optional)
+    //   - status: string (required, ['vacant', 'occupied', 'maintenance'])
+    //
+    // Collection: /tenants/{tenantId}
+    // Fields:
+    //   - name: string (required)
+    //   - phone: string (required)
+    //   - nationality: string (required)
+    //   - company: string (required)
+    //   - apartmentId: string (required)
+    //   - startDate: string (required)
+    //   - endDate: string (required)
+    //   - contractValue: number (required)
     //
     // Collection: /contracts/{contractId}
     // Fields:
@@ -197,10 +207,24 @@ service cloud.firestore {
     }
 
     function isValidApartment(data) {
-      return data.keys().hasAll(['buildingId', 'number', 'status']) &&
+      return data.keys().hasAll(['buildingId', 'buildingName', 'number', 'status']) &&
              data.buildingId is string &&
+             data.buildingName is string &&
              data.number is string &&
-             data.status in ['vacant', 'occupied'];
+             data.status in ['vacant', 'occupied', 'maintenance'];
+    }
+
+    function isValidTenant(data) {
+      let requiredFields = ['name', 'phone', 'nationality', 'company', 'apartmentId', 'startDate', 'endDate', 'contractValue'];
+      return data.keys().hasAll(requiredFields) &&
+             data.name is string &&
+             data.phone is string &&
+             data.nationality is string &&
+             data.company is string &&
+             data.apartmentId is string &&
+             data.startDate is string &&
+             data.endDate is string &&
+             data.contractValue is number;
     }
 
     function isValidContract(data) {
@@ -280,6 +304,10 @@ service cloud.firestore {
     }
 
     match /apartments/{apartmentId} {
+      allow read, write: if true;
+    }
+
+    match /tenants/{tenantId} {
       allow read, write: if true;
     }
 
