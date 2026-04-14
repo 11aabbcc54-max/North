@@ -85,7 +85,8 @@ import {
   History,
   Wrench,
   Globe,
-  Users
+  Users,
+  Ban
 } from 'lucide-react';
 import { 
   format, 
@@ -2314,9 +2315,10 @@ const BrandingModal = ({
                       className={cn(
                         "flex items-center gap-2 p-3 rounded-2xl border-2 transition-all",
                         color === t.id 
-                          ? "border-primary bg-primary/5" 
+                          ? `border-current bg-current/10` 
                           : "border-transparent bg-gray-50 dark:bg-slate-800 hover:bg-gray-100 dark:hover:bg-slate-700"
                       )}
+                      style={color === t.id ? { borderColor: t.class.match(/\[(.*)\]/)?.[1], backgroundColor: `${t.class.match(/\[(.*)\]/)?.[1]}1A`, color: t.class.match(/\[(.*)\]/)?.[1] } : {}}
                     >
                       <div className={cn("w-4 h-4 rounded-full", t.class)} />
                       <span className="text-xs font-bold text-gray-900 dark:text-white">{t.label}</span>
@@ -2338,34 +2340,18 @@ const BrandingModal = ({
               </div>
 
               <div className="flex items-center justify-between p-5 bg-gray-50 dark:bg-slate-800/50 rounded-3xl border border-gray-100 dark:border-slate-800">
-                <div className="flex items-center gap-4">
-                  <div className={cn(
-                    "w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm",
-                    isDarkMode ? "bg-amber-500/10 text-amber-500" : "bg-primary/10 text-primary"
-                  )}>
-                    {isDarkMode ? <Sun size={24} /> : <Moon size={24} />}
-                  </div>
-                  <div>
-                    <p className="text-sm font-black text-gray-900 dark:text-white">نمط العرض</p>
-                    <p className="text-[10px] font-bold text-gray-400">{isDarkMode ? 'الوضع الليلي مفعل' : 'الوضع الفاتح مفعل'}</p>
-                  </div>
+                <div className="theme-switch-wrapper">
+                  <label className="theme-switch" htmlFor="modal-checkbox">
+                    <input 
+                      type="checkbox" 
+                      id="modal-checkbox" 
+                      checked={isDarkMode}
+                      onChange={() => setIsDarkMode(!isDarkMode)}
+                    />
+                    <div className="slider round"></div>
+                  </label>
+                  <em className="text-sm font-black text-gray-900 dark:text-white not-italic">الوضع الداكن</em>
                 </div>
-                <button 
-                  onClick={() => {
-                    const next = !isDarkMode;
-                    setIsDarkMode(next);
-                    toast.info(next ? 'تم تفعيل الوضع الليلي' : 'تم تفعيل الوضع الفاتح');
-                  }}
-                  className={cn(
-                    "w-14 h-7 rounded-full transition-all relative p-1",
-                    isDarkMode ? "bg-primary" : "bg-gray-300"
-                  )}
-                >
-                  <motion.div 
-                    animate={{ x: isDarkMode ? 28 : 0 }}
-                    className="w-5 h-5 bg-white rounded-full shadow-md"
-                  />
-                </button>
               </div>
 
               <div className="pt-4">
@@ -2393,6 +2379,7 @@ function AppContent() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingRequest, setEditingRequest] = useState<CleaningRequest | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(new Date());
+  const [dailyTasksView, setDailyTasksView] = useState<'today' | 'all'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'dashboard' | 'daily-tasks' | string>(() => {
     const params = new URLSearchParams(window.location.search);
@@ -2447,17 +2434,21 @@ function AppContent() {
   const [isInventoryModalOpen, setIsInventoryModalOpen] = useState(false);
   const [editingInventoryItem, setEditingInventoryItem] = useState<InventoryItem | null>(null);
   const [globalSelectedDate, setGlobalSelectedDate] = useState(new Date());
-  const [appName, setAppName] = useState('إدارة النظافة');
+  const [appName, setAppName] = useState('North Residence');
   const [appLogo, setAppLogo] = useState<string | null>(null);
   const [appBackground, setAppBackground] = useState<string | null>(null);
   const [bgOpacity, setBgOpacity] = useState(20);
   const [themeColor, setThemeColor] = useState('emerald');
   const [clubSubscriptions, setClubSubscriptions] = useState<ClubSubscription[]>([]);
+  const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [workerForm, setWorkerForm] = useState({ name: '', phone: '' });
+  const [isAddingWorker, setIsAddingWorker] = useState(false);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [isClubSubscriptionModalOpen, setIsClubSubscriptionModalOpen] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isRegisterMode, setIsRegisterMode] = useState(false);
   const [loginForm, setLoginForm] = useState({ username: '', password: '', displayName: '' });
+  const [loginMethod, setLoginMethod] = useState<'username' | 'phone'>('username');
   const [isPublicBookingView, setIsPublicBookingView] = useState(false);
   const [editingClubSub, setEditingClubSub] = useState<ClubSubscription | null>(null);
   const [clubSubBuildingFilter, setClubSubBuildingFilter] = useState('all');
@@ -2495,18 +2486,6 @@ function AppContent() {
   const bulkInvoicesRef = useRef<HTMLDivElement>(null);
   const isAdmin = user?.uid === 'fyozr-admin-user' || user?.email === '11aabbcc54@gmail.com' || (user as any)?.role === 'admin';
 
-  useEffect(() => {
-    if (searchTerm.trim() !== '') {
-      setViewMode('summary');
-    }
-  }, [searchTerm]);
-
-  useEffect(() => {
-    const url = new URL(window.location.href);
-    url.searchParams.set('tab', activeTab);
-    window.history.replaceState({}, '', url.toString());
-  }, [activeTab]);
-
   const NAV_ITEMS = [
     { id: 'dashboard', label: 'لوحة التحكم', icon: LayoutDashboard },
     { id: 'daily-tasks', label: 'المهام اليومية', icon: CalendarCheck },
@@ -2518,8 +2497,33 @@ function AppContent() {
     { id: 'طلبات الصيانة', label: 'طلبات الصيانة', icon: Wrench },
     ...BUILDINGS.map(b => ({ id: b, label: b, icon: Home })),
     { id: 'تنظيف سيارات', label: 'تنظيف السيارات', icon: Car },
-    ...(isAdmin ? [{ id: 'settings', label: 'إعدادات الهوية', icon: Settings }] : [])
-  ];
+    ...(isAdmin ? [
+      { id: 'users', label: 'إدارة المستخدمين', icon: Users },
+      { id: 'settings', label: 'إعدادات الهوية', icon: Settings }
+    ] : [])
+  ].filter(item => {
+    if (isAdmin) return true;
+    const userPerms = (user as any)?.permissions || [];
+    return userPerms.includes(item.id);
+  });
+
+  useEffect(() => {
+    if (searchTerm.trim() !== '') {
+      setViewMode('summary');
+    }
+  }, [searchTerm]);
+
+  useEffect(() => {
+    if (NAV_ITEMS.length > 0 && !NAV_ITEMS.find(item => item.id === activeTab)) {
+      setActiveTab(NAV_ITEMS[0].id);
+    }
+  }, [NAV_ITEMS, activeTab]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', activeTab);
+    window.history.replaceState({}, '', url.toString());
+  }, [activeTab]);
 
   useEffect(() => {
     if (!user) return;
@@ -2959,12 +2963,110 @@ function AppContent() {
     return () => unsubscribe();
   }, [user]);
 
+  useEffect(() => {
+    if (!user || !isAdmin) return;
+    const unsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
+      const usersData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setAllUsers(usersData);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'users');
+    });
+    return () => unsubscribe();
+  }, [user, isAdmin]);
+
+  const toggleUserBlock = async (userId: string, currentStatus: boolean) => {
+    try {
+      await updateDoc(doc(db, 'users', userId), { isBlocked: !currentStatus });
+      toast.success(!currentStatus ? 'تم حظر المستخدم بنجاح' : 'تم إلغاء حظر المستخدم');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}`);
+    }
+  };
+
+  const updateUserRole = async (userId: string, newRole: string) => {
+    try {
+      await updateDoc(doc(db, 'users', userId), { role: newRole });
+      toast.success('تم تحديث صلاحيات المستخدم');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}`);
+    }
+  };
+
+  const toggleUserPermission = async (userId: string, permissionId: string, currentPermissions: string[] = []) => {
+    try {
+      let newPermissions = [...currentPermissions];
+      if (newPermissions.includes(permissionId)) {
+        newPermissions = newPermissions.filter(p => p !== permissionId);
+      } else {
+        newPermissions.push(permissionId);
+      }
+      await updateDoc(doc(db, 'users', userId), { permissions: newPermissions });
+      toast.success('تم تحديث صلاحيات الوصول');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}`);
+    }
+  };
+
+  const addWorker = async () => {
+    if (!workerForm.name || !workerForm.phone) {
+      toast.error('يرجى إدخال الاسم ورقم الجوال');
+      return;
+    }
+    setIsAddingWorker(true);
+    try {
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('username', '==', workerForm.phone));
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) {
+        toast.error('رقم الجوال مسجل مسبقاً');
+        setIsAddingWorker(false);
+        return;
+      }
+
+      await addDoc(usersRef, {
+        uid: 'worker-' + Date.now(),
+        username: workerForm.phone,
+        password: workerForm.phone, // Default password is phone number
+        displayName: workerForm.name,
+        email: `${workerForm.phone}@worker.local`,
+        role: 'user',
+        permissions: ['staff'],
+        createdAt: Timestamp.now()
+      });
+
+      setWorkerForm({ name: '', phone: '' });
+      toast.success('تم إضافة العامل بنجاح. يمكنه الدخول باستخدام رقم جواله كاسم مستخدم وكلمة مرور');
+    } catch (error) {
+      console.error(error);
+      toast.error('حدث خطأ أثناء إضافة العامل');
+    } finally {
+      setIsAddingWorker(false);
+    }
+  };
+
+  const deleteUser = async (userId: string) => {
+    try {
+      await deleteDoc(doc(db, 'users', userId));
+      toast.success('تم حذف المستخدم بنجاح');
+    } catch (error) {
+      console.error(error);
+      toast.error('حدث خطأ أثناء حذف المستخدم');
+    }
+  };
+
   const handleAuth = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (isLoggingIn) return;
     
-    if (!loginForm.username || !loginForm.password) {
-      toast.error('يرجى إدخال اسم المستخدم وكلمة المرور');
+    const username = loginForm.username.trim().toLowerCase();
+    const password = loginMethod === 'phone' ? loginForm.username.trim() : loginForm.password;
+
+    if (!username || !password) {
+      toast.error(loginMethod === 'phone' ? 'يرجى إدخال رقم الجوال' : 'يرجى إدخال اسم المستخدم وكلمة المرور');
       return;
     }
 
@@ -2980,7 +3082,7 @@ function AppContent() {
       
       if (isRegisterMode) {
         // Registration Logic
-        const q = query(usersRef, where('username', '==', loginForm.username.toLowerCase()));
+        const q = query(usersRef, where('username', '==', username));
         const querySnapshot = await getDocs(q);
         
         if (!querySnapshot.empty) {
@@ -2991,10 +3093,10 @@ function AppContent() {
 
         const newUser = {
           uid: 'user-' + Date.now(),
-          username: loginForm.username.toLowerCase(),
-          password: loginForm.password, // In a real app, hash this
+          username: username,
+          password: password, // In a real app, hash this
           displayName: loginForm.displayName,
-          email: `${loginForm.username.toLowerCase()}@fyozr.local`,
+          email: `${username}@fyozr.local`,
           role: 'admin', // Default to admin for now as per user request to "share the table"
           createdAt: Timestamp.now()
         };
@@ -3006,7 +3108,7 @@ function AppContent() {
       } else {
         // Login Logic
         // Fallback for hardcoded admin
-        if (loginForm.username === 'Fyozr' && loginForm.password === '5150') {
+        if (username === 'fyozr' && password === '5150') {
           const mockUser = {
             uid: 'fyozr-admin-user',
             email: 'Fyozr@system.local',
@@ -3022,18 +3124,25 @@ function AppContent() {
         }
 
         const q = query(usersRef, 
-          where('username', '==', loginForm.username.toLowerCase()),
-          where('password', '==', loginForm.password)
+          where('username', '==', username),
+          where('password', '==', password)
         );
         const querySnapshot = await getDocs(q);
 
         if (querySnapshot.empty) {
-          toast.error('اسم المستخدم أو كلمة المرور غير صحيحة');
+          toast.error(loginMethod === 'phone' ? 'رقم الجوال غير مسجل أو غير صحيح' : 'اسم المستخدم أو كلمة المرور غير صحيحة');
           setIsLoggingIn(false);
           return;
         }
 
         const userData = querySnapshot.docs[0].data();
+        
+        if (userData.isBlocked) {
+          toast.error('هذا الحساب محظور من دخول الموقع. يرجى التواصل مع الإدارة.');
+          setIsLoggingIn(false);
+          return;
+        }
+
         setUser({
           ...userData,
           id: querySnapshot.docs[0].id
@@ -3491,23 +3600,9 @@ function AppContent() {
     return Object.values(summary).sort((a, b) => b.unpaid - a.unpaid);
   }, [filteredRequests]);
 
-  const colors: Record<string, string> = {
-    olive: '#10B981',
-    sage: '#6366F1',
-    cream: '#F43F5E',
-    blue: '#3B82F6',
-    indigo: '#8B5CF6',
-    rose: '#EC4899',
-    emerald: '#10B981',
-    amber: '#F59E0B',
-    slate: '#334155',
-  };
-  const primaryColor = colors[themeColor] || colors.blue;
-
   useEffect(() => {
-    const root = document.documentElement;
-    root.style.setProperty('--primary-color', primaryColor);
-  }, [primaryColor]);
+    document.documentElement.setAttribute('data-theme', themeColor);
+  }, [themeColor]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -3540,12 +3635,44 @@ function AppContent() {
           animate={{ opacity: 1, y: 0 }}
           className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] shadow-2xl max-w-md w-full text-center border border-white/10 dark:border-slate-800"
         >
-          <div className="bg-primary/10 p-5 rounded-3xl w-20 h-20 flex items-center justify-center mx-auto mb-6">
-            <Building2 className="text-primary w-10 h-10" />
+          <div className="mb-6">
+            {appLogo ? (
+              <img 
+                src={appLogo} 
+                alt={appName} 
+                className="w-24 h-24 object-contain mx-auto rounded-2xl"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="bg-primary/10 p-5 rounded-3xl w-20 h-20 flex items-center justify-center mx-auto border border-primary/30">
+                <Building2 className="text-primary w-10 h-10" />
+              </div>
+            )}
           </div>
           <h1 className="text-2xl font-black text-gray-900 dark:text-white mb-2">{appName}</h1>
           <p className="text-gray-500 dark:text-slate-400 mb-8 text-sm">إدارة ذكية لطلبات النظافة في مجمعاتنا السكنية</p>
           
+          <div className="flex items-center justify-center gap-2 mb-8 bg-gray-50 dark:bg-slate-800/50 p-1 rounded-2xl border dark:border-slate-800">
+            <button 
+              onClick={() => setLoginMethod('username')}
+              className={cn(
+                "flex-1 py-2.5 rounded-xl text-xs font-black transition-all",
+                loginMethod === 'username' ? "bg-white dark:bg-slate-700 text-primary shadow-sm" : "text-gray-400 hover:text-gray-600 dark:hover:text-slate-300"
+              )}
+            >
+              اسم المستخدم
+            </button>
+            <button 
+              onClick={() => setLoginMethod('phone')}
+              className={cn(
+                "flex-1 py-2.5 rounded-xl text-xs font-black transition-all",
+                loginMethod === 'phone' ? "bg-white dark:bg-slate-700 text-primary shadow-sm" : "text-gray-400 hover:text-gray-600 dark:hover:text-slate-300"
+              )}
+            >
+              رقم الجوال
+            </button>
+          </div>
+
           <form onSubmit={handleAuth} className="space-y-4">
             {isRegisterMode && (
               <div className="text-right">
@@ -3561,27 +3688,36 @@ function AppContent() {
               </div>
             )}
             <div className="text-right">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 mr-1">اسم المستخدم</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 mr-1">
+                {loginMethod === 'phone' ? 'رقم الجوال' : 'اسم المستخدم'}
+              </label>
               <input 
                 type="text"
                 value={loginForm.username}
                 onChange={(e) => setLoginForm(prev => ({ ...prev, username: e.target.value }))}
                 className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary outline-none transition-all"
-                placeholder="أدخل اسم المستخدم"
+                placeholder={loginMethod === 'phone' ? 'أدخل رقم الجوال المسجل' : 'أدخل اسم المستخدم'}
                 required
               />
             </div>
-            <div className="text-right">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 mr-1">كلمة المرور</label>
-              <input 
-                type="password"
-                value={loginForm.password}
-                onChange={(e) => setLoginForm(prev => ({ ...prev, password: e.target.value }))}
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary outline-none transition-all"
-                placeholder="أدخل كلمة المرور"
-                required
-              />
-            </div>
+            {loginMethod === 'username' && (
+              <div className="text-right">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 mr-1">كلمة المرور</label>
+                <input 
+                  type="password"
+                  value={loginForm.password}
+                  onChange={(e) => setLoginForm(prev => ({ ...prev, password: e.target.value }))}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary outline-none transition-all"
+                  placeholder="أدخل كلمة المرور"
+                  required
+                />
+              </div>
+            )}
+            {loginMethod === 'phone' && (
+              <p className="text-[10px] font-bold text-gray-400 mt-2 mr-1 text-right">
+                * سيتم تسجيل الدخول مباشرة باستخدام رقم الجوال المسجل من قبل الإدارة.
+              </p>
+            )}
             <button 
               type="submit"
               disabled={isLoggingIn}
@@ -3639,9 +3775,18 @@ function AppContent() {
         <div className="w-80 flex flex-col h-full">
           <div className="p-8 border-b dark:border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-4 group/sidebar-logo">
-              <div className="bg-primary p-3 rounded-2xl shadow-xl shadow-primary/20 dark:shadow-none shrink-0">
-                <Building2 className="text-white w-6 h-6" />
-              </div>
+              {appLogo ? (
+                <img 
+                  src={appLogo} 
+                  alt={appName} 
+                  className="w-12 h-12 object-contain rounded-xl shadow-lg"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="bg-primary p-3 rounded-2xl shadow-xl shadow-primary/20 dark:shadow-none shrink-0">
+                  <Building2 className="text-white w-6 h-6" />
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <span className="font-cairo font-black text-2xl text-primary dark:text-white tracking-tight">{appName}</span>
                 {isAdmin && (
@@ -3692,33 +3837,20 @@ function AppContent() {
               </div>
               
               <div className="space-y-3">
-                <button 
-                  onClick={() => {
-                    const next = !isDarkMode;
-                    setIsDarkMode(next);
-                    toast.info(next ? 'تم تفعيل الوضع الليلي' : 'تم تفعيل الوضع الفاتح');
-                  }}
-                  className="w-full flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-xl shadow-sm border dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:text-primary transition-all group"
-                >
-                  <div className="flex items-center gap-2">
-                    <div className={cn(
-                      "p-1.5 rounded-lg transition-colors",
-                      isDarkMode ? "bg-amber-500/10 text-amber-500" : "bg-primary/10 text-primary"
-                    )}>
-                      {isDarkMode ? <Sun size={16} /> : <Moon size={16} />}
-                    </div>
-                    <span className="text-xs font-bold">{isDarkMode ? 'الوضع الفاتح' : 'الوضع الليلي'}</span>
+                <div className="flex items-center justify-between p-4 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border dark:border-slate-700">
+                  <div className="theme-switch-wrapper">
+                    <label className="theme-switch" htmlFor="sidebar-checkbox">
+                      <input 
+                        type="checkbox" 
+                        id="sidebar-checkbox" 
+                        checked={isDarkMode}
+                        onChange={() => setIsDarkMode(!isDarkMode)}
+                      />
+                      <div className="slider round"></div>
+                    </label>
+                    <em className="text-xs font-black text-gray-900 dark:text-white not-italic">الوضع الداكن</em>
                   </div>
-                  <div className={cn(
-                    "w-8 h-4 rounded-full transition-all relative",
-                    isDarkMode ? "bg-primary" : "bg-gray-300"
-                  )}>
-                    <motion.div 
-                      animate={{ x: isDarkMode ? 16 : 2 }}
-                      className="absolute top-0.5 left-0 w-3 h-3 bg-white rounded-full shadow-sm"
-                    />
-                  </div>
-                </button>
+                </div>
 
                 <button 
                   onClick={logout}
@@ -3813,7 +3945,22 @@ function AppContent() {
                 ))}
               </nav>
               
-              <div className="p-4 border-t dark:border-slate-800">
+              <div className="p-4 border-t dark:border-slate-800 space-y-3">
+                <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-slate-800 rounded-2xl border dark:border-slate-700">
+                  <div className="theme-switch-wrapper">
+                    <label className="theme-switch" htmlFor="mobile-checkbox">
+                      <input 
+                        type="checkbox" 
+                        id="mobile-checkbox" 
+                        checked={isDarkMode}
+                        onChange={() => setIsDarkMode(!isDarkMode)}
+                      />
+                      <div className="slider round"></div>
+                    </label>
+                    <em className="text-xs font-black text-gray-900 dark:text-white not-italic">الوضع الداكن</em>
+                  </div>
+                </div>
+
                 <div className="bg-gray-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-gray-100 dark:border-slate-800">
                   <div className="flex items-center gap-3 mb-3">
                     <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white font-black text-sm shadow-inner">
@@ -3899,19 +4046,20 @@ function AppContent() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-1.5">
-                <motion.button 
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
-                  onClick={() => {
-                    const next = !isDarkMode;
-                    setIsDarkMode(next);
-                    toast.info(next ? 'تم تفعيل الوضع الليلي' : 'تم تفعيل الوضع الفاتح');
-                  }}
-                  className="p-2.5 bg-slate-100 dark:bg-slate-800 text-gray-600 dark:text-slate-400 rounded-xl hover:bg-gray-200 dark:hover:bg-slate-700 transition-all"
-                >
-                  {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
-                </motion.button>
+              <div className="flex items-center gap-3 bg-slate-100 dark:bg-slate-800 px-4 py-2 rounded-2xl border dark:border-slate-700">
+                <div className="theme-switch-wrapper">
+                  <label className="theme-switch" htmlFor="header-checkbox">
+                    <input 
+                      type="checkbox" 
+                      id="header-checkbox" 
+                      checked={isDarkMode}
+                      onChange={() => setIsDarkMode(!isDarkMode)}
+                    />
+                    <div className="slider round"></div>
+                  </label>
+                  <em className="text-xs font-black text-gray-600 dark:text-slate-400 not-italic">الوضع الداكن</em>
+                </div>
+              </div>
 
                 <motion.button 
                   whileHover={{ scale: 1.1 }}
@@ -3933,10 +4081,7 @@ function AppContent() {
               </div>
             </div>
           </div>
-        </div>
-
-        {/* Mobile Navigation Menu - Removed in favor of unified drawer */}
-      </header>
+        </header>
 
       {/* Main Content Area */}
       <main className="flex-1 overflow-y-auto custom-scrollbar">
@@ -4036,7 +4181,7 @@ function AppContent() {
                   label: 'لم يتم الدفع (شقق)', 
                   value: stats.unpaidApartments, 
                   icon: AlertCircle, 
-                  color: 'amber', 
+                  color: 'primary', 
                   trend: stats.unpaidApartments > 0 ? '+!' : '0',
                   onClick: () => {
                     setPaymentFilter('unpaid');
@@ -4049,7 +4194,7 @@ function AppContent() {
                   label: 'لم يتم الدفع (سيارات)', 
                   value: stats.unpaidCars, 
                   icon: Car, 
-                  color: 'sage', 
+                  color: 'primary', 
                   trend: stats.unpaidCars > 0 ? '+!' : '0',
                   onClick: () => {
                     setPaymentFilter('unpaid');
@@ -4062,7 +4207,7 @@ function AppContent() {
                   label: 'طلبات منفذة (شهرياً)', 
                   value: stats.completed, 
                   icon: CheckCircle2, 
-                  color: 'olive', 
+                  color: 'primary', 
                   trend: '+15%',
                   onClick: () => {
                     setPaymentFilter('all');
@@ -4138,7 +4283,7 @@ function AppContent() {
                   <div className="space-y-6">
                     {[
                       { label: 'نسبة الإنجاز', value: Math.round((stats.completed / (stats.total || 1)) * 100), color: 'bg-primary' },
-                      { label: 'نسبة التحصيل', value: Math.round((stats.paidCount / (stats.total || 1)) * 100), color: 'bg-emerald-500' },
+                      { label: 'نسبة التحصيل', value: Math.round((stats.paidCount / (stats.total || 1)) * 100), color: 'bg-primary' },
                       { label: 'الطلبات المتبقية', value: Math.round(((stats.total - stats.completed) / (stats.total || 1)) * 100), color: 'bg-amber-500' },
                     ].map((item, idx) => (
                       <div key={idx} className="space-y-2">
@@ -4177,7 +4322,7 @@ function AppContent() {
                   </div>
                   <div className="mt-8 pt-8 border-t border-white/10 flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <div className="bg-emerald-500/20 p-2 rounded-xl">
+                      <div className="bg-primary/20 p-2 rounded-xl">
                         <TrendingUp className="text-emerald-400" size={20} />
                       </div>
                       <span className="font-cairo text-sm font-bold text-emerald-400">+12% عن الشهر الماضي</span>
@@ -4798,21 +4943,50 @@ function AppContent() {
                   </div>
                 </div>
 
-                <motion.button 
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={shareSite}
-                  className="flex items-center gap-3 bg-primary text-white px-6 py-3 rounded-2xl font-black shadow-lg shadow-primary/20 dark:shadow-none hover:bg-primary/90 transition-all"
-                >
-                  <Share2 size={20} />
-                  <span>مشاركة الجدول</span>
-                </motion.button>
+                <div className="flex items-center gap-4">
+                  <div className="flex bg-white dark:bg-slate-800 p-1 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm">
+                    <button 
+                      onClick={() => setDailyTasksView('today')}
+                      className={cn(
+                        "px-6 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2",
+                        dailyTasksView === 'today' 
+                          ? "bg-primary text-white shadow-lg shadow-primary/20" 
+                          : "text-gray-500 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-slate-700"
+                      )}
+                    >
+                      <Clock size={14} />
+                      مهام اليوم
+                    </button>
+                    <button 
+                      onClick={() => setDailyTasksView('all')}
+                      className={cn(
+                        "px-6 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2",
+                        dailyTasksView === 'all' 
+                          ? "bg-primary text-white shadow-lg shadow-primary/20" 
+                          : "text-gray-500 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-slate-700"
+                      )}
+                    >
+                      <ListTodo size={14} />
+                      الطلبات
+                    </button>
+                  </div>
+
+                  <motion.button 
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={shareSite}
+                    className="flex items-center gap-3 bg-primary text-white px-6 py-3 rounded-2xl font-black shadow-lg shadow-primary/20 dark:shadow-none hover:bg-primary/90 transition-all"
+                  >
+                    <Share2 size={20} />
+                    <span>مشاركة الجدول</span>
+                  </motion.button>
+                </div>
               </div>
 
               <div className="space-y-8">
                 {eachDayOfInterval({
-                  start: startOfMonth(selectedMonth),
-                  end: endOfMonth(selectedMonth)
+                  start: dailyTasksView === 'today' ? new Date() : startOfMonth(selectedMonth),
+                  end: dailyTasksView === 'today' ? new Date() : endOfMonth(selectedMonth)
                 }).map(day => {
                   const dayRequests = filteredRequests.filter(r => isSameDay(safeToDate(r.date), day));
                   if (dayRequests.length === 0) return null;
@@ -4906,7 +5080,7 @@ function AppContent() {
             <div className="space-y-10 mb-10">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
                 <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-amber-500 rounded-2xl flex items-center justify-center shadow-lg shadow-amber-500/20 dark:shadow-none">
+                  <div className="w-12 h-12 bg-primary rounded-2xl flex items-center justify-center shadow-lg shadow-primary/20 dark:shadow-none">
                     <Wrench className="text-white" size={24} />
                   </div>
                   <div>
@@ -4942,7 +5116,7 @@ function AppContent() {
                       onClick={() => setStatusFilter('completed')}
                       className={cn(
                         "px-4 py-2 rounded-lg text-xs font-black transition-all",
-                        statusFilter === 'completed' ? "bg-emerald-500 text-white shadow-md" : "text-gray-500 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-slate-700"
+                        statusFilter === 'completed' ? "bg-primary text-white shadow-md" : "text-gray-500 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-slate-700"
                       )}
                     >
                       مكتمل
@@ -5140,12 +5314,12 @@ function AppContent() {
                   </h3>
                 </div>
 
-                <div className="bg-emerald-50 dark:bg-emerald-900/20 p-6 rounded-3xl border border-emerald-100 dark:border-emerald-900/30">
-                  <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-800 rounded-2xl flex items-center justify-center mb-4">
-                    <CheckCircle2 className="text-emerald-600 dark:text-emerald-400" size={20} />
+                <div className="bg-primary/10 dark:bg-primary/20 p-6 rounded-3xl border border-primary/20 dark:border-primary/30">
+                  <div className="w-10 h-10 bg-primary/20 dark:bg-primary/30 rounded-2xl flex items-center justify-center mb-4">
+                    <CheckCircle2 className="text-primary dark:text-primary" size={20} />
                   </div>
-                  <p className="text-[10px] font-black text-emerald-600/60 dark:text-emerald-400/60 uppercase tracking-widest">تم التوصيل في {format(globalSelectedDate, 'dd/MM')}</p>
-                  <h3 className="text-3xl font-black text-emerald-900 dark:text-emerald-100 mt-1">
+                  <p className="text-[10px] font-black text-primary/60 dark:text-primary/60 uppercase tracking-widest">تم التوصيل في {format(globalSelectedDate, 'dd/MM')}</p>
+                  <h3 className="text-3xl font-black text-primary dark:text-white mt-1">
                     {requests.filter(r => r.serviceType === 'توصيل مياه' && r.status === 'completed' && isSameDay(safeToDate(r.date), globalSelectedDate)).length}
                   </h3>
                 </div>
@@ -5160,12 +5334,12 @@ function AppContent() {
                   </h3>
                 </div>
 
-                <div className="bg-emerald-50 dark:bg-emerald-900/20 p-6 rounded-3xl border border-emerald-100 dark:border-emerald-900/30">
-                  <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-800 rounded-2xl flex items-center justify-center mb-4">
-                    <DollarSign className="text-emerald-600 dark:text-emerald-400" size={20} />
+                <div className="bg-primary/10 dark:bg-primary/20 p-6 rounded-3xl border border-primary/20 dark:border-primary/30">
+                  <div className="w-10 h-10 bg-primary/20 dark:bg-primary/30 rounded-2xl flex items-center justify-center mb-4">
+                    <DollarSign className="text-primary dark:text-primary" size={20} />
                   </div>
-                  <p className="text-[10px] font-black text-emerald-600/60 dark:text-emerald-400/60 uppercase tracking-widest">المبالغ المحصلة</p>
-                  <h3 className="text-3xl font-black text-emerald-900 dark:text-emerald-100 mt-1">
+                  <p className="text-[10px] font-black text-primary/60 dark:text-primary/60 uppercase tracking-widest">المبالغ المحصلة</p>
+                  <h3 className="text-3xl font-black text-primary dark:text-white mt-1">
                     {requests.filter(r => r.serviceType === 'توصيل مياه' && r.paymentStatus === 'paid').reduce((acc, r) => acc + r.price, 0)}
                     <span className="text-sm font-bold mr-1 opacity-60">ريال</span>
                   </h3>
@@ -5475,6 +5649,201 @@ function AppContent() {
             </div>
           )}
 
+          {/* Users Management Tab */}
+          {activeTab === 'users' && isAdmin && (
+            <div className="space-y-8 mb-10">
+              {/* Add Worker Form */}
+              <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-8 border border-gray-100 dark:border-slate-800 shadow-sm">
+                <div className="flex items-center gap-5 mb-8">
+                  <div className="w-12 h-12 bg-primary/10 rounded-2xl flex items-center justify-center">
+                    <Plus className="text-primary" size={24} />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-black text-gray-900 dark:text-white tracking-tight">إضافة عامل جديد</h2>
+                    <p className="text-xs font-bold text-gray-500 dark:text-slate-400">إضافة عامل بصلاحية الدخول لخانة إدارة العمالة فقط</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-400 uppercase mr-2">اسم العامل</label>
+                    <input 
+                      type="text"
+                      value={workerForm.name}
+                      onChange={(e) => setWorkerForm(prev => ({ ...prev, name: e.target.value }))}
+                      placeholder="أدخل اسم العامل"
+                      className="w-full px-5 py-3.5 rounded-2xl bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 text-sm font-bold outline-none focus:ring-2 focus:ring-primary transition-all"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-400 uppercase mr-2">رقم الجوال (اسم المستخدم)</label>
+                    <input 
+                      type="text"
+                      value={workerForm.phone}
+                      onChange={(e) => setWorkerForm(prev => ({ ...prev, phone: e.target.value }))}
+                      placeholder="أدخل رقم الجوال"
+                      className="w-full px-5 py-3.5 rounded-2xl bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 text-sm font-bold outline-none focus:ring-2 focus:ring-primary transition-all"
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <button 
+                      onClick={addWorker}
+                      disabled={isAddingWorker}
+                      className="w-full bg-primary text-white py-3.5 rounded-2xl font-black text-sm shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {isAddingWorker ? (
+                        <motion.div 
+                          animate={{ rotate: 360 }}
+                          transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                          className="rounded-full h-4 w-4 border-2 border-white border-t-transparent"
+                        />
+                      ) : (
+                        <>
+                          <Plus size={18} />
+                          إضافة العامل
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-8 border border-gray-100 dark:border-slate-800 shadow-sm">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+                  <div className="flex items-center gap-5">
+                    <div className="w-14 h-14 bg-primary rounded-2xl flex items-center justify-center shadow-lg shadow-primary/20 dark:shadow-none">
+                      <Users className="text-white" size={28} />
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">
+                        إدارة المستخدمين
+                      </h2>
+                      <p className="text-gray-500 dark:text-slate-400 font-bold mt-1">التحكم في صلاحيات المستخدمين وحظرهم من الموقع</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right border-separate border-spacing-y-3">
+                    <thead>
+                      <tr className="text-gray-400 text-xs font-black uppercase tracking-widest">
+                        <th className="px-6 py-4">المستخدم</th>
+                        <th className="px-6 py-4">اسم المستخدم</th>
+                        <th className="px-6 py-4">تاريخ التسجيل</th>
+                        <th className="px-6 py-4">الصلاحية</th>
+                        <th className="px-6 py-4">الحالة</th>
+                        <th className="px-6 py-4">الإجراءات</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allUsers.map((u) => (
+                        <motion.tr 
+                          key={u.id}
+                          initial={{ opacity: 0, x: 20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          className="bg-gray-50 dark:bg-slate-800/50 hover:bg-gray-100 dark:hover:bg-slate-800 transition-all group"
+                        >
+                          <td className="px-6 py-5 rounded-r-3xl">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary font-black">
+                                {u.displayName?.[0] || 'U'}
+                              </div>
+                              <div className="font-black text-gray-900 dark:text-white">{u.displayName}</div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-5">
+                            <div className="font-bold text-gray-700 dark:text-slate-300">{u.username}</div>
+                          </td>
+                          <td className="px-6 py-5">
+                            <div className="text-[10px] font-bold text-gray-400">
+                              {u.createdAt ? format(safeToDate(u.createdAt), 'yyyy/MM/dd') : 'غير متوفر'}
+                            </div>
+                          </td>
+                          <td className="px-6 py-5">
+                            <div className="flex flex-col gap-2">
+                              <select 
+                                value={u.role || 'user'}
+                                onChange={(e) => updateUserRole(u.id, e.target.value)}
+                                className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs font-bold outline-none focus:ring-2 focus:ring-primary mb-2"
+                              >
+                                <option value="user">مستخدم مخصص</option>
+                                <option value="admin">مسؤول كامل (Admin)</option>
+                              </select>
+                              
+                              {u.role !== 'admin' && (
+                                <div className="grid grid-cols-2 gap-1 max-w-[300px]">
+                                  {[
+                                    { id: 'dashboard', label: 'لوحة التحكم' },
+                                    { id: 'daily-tasks', label: 'المهام اليومية' },
+                                    { id: 'تكرار الطلبات', label: 'تكرار الطلبات' },
+                                    { id: 'staff', label: 'إدارة العمالة' },
+                                    { id: 'club-subscriptions', label: 'اشتراكات النادي' },
+                                    { id: 'bookings', label: 'إدارة الحجوزات' },
+                                    { id: 'طلبات الماء', label: 'إدارة المياه والمخزون' },
+                                    { id: 'طلبات الصيانة', label: 'طلبات الصيانة' },
+                                    { id: 'تنظيف سيارات', label: 'تنظيف السيارات' },
+                                    ...BUILDINGS.map(b => ({ id: b, label: b }))
+                                  ].map(perm => (
+                                    <label key={perm.id} className="flex items-center gap-1 cursor-pointer">
+                                      <input 
+                                        type="checkbox"
+                                        checked={(u.permissions || []).includes(perm.id)}
+                                        onChange={() => toggleUserPermission(u.id, perm.id, u.permissions)}
+                                        className="w-3 h-3 accent-primary"
+                                      />
+                                      <span className="text-[9px] font-bold text-gray-500 whitespace-nowrap">{perm.label}</span>
+                                    </label>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-5">
+                            <span className={cn(
+                              "px-3 py-1 rounded-full text-[10px] font-black",
+                              u.isBlocked ? "bg-rose-100 text-rose-600" : "bg-emerald-100 text-emerald-600"
+                            )}>
+                              {u.isBlocked ? 'محظور' : 'نشط'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-5 rounded-l-3xl">
+                            <div className="flex items-center gap-2">
+                              <button 
+                                onClick={() => toggleUserBlock(u.id, !!u.isBlocked)}
+                                className={cn(
+                                  "flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black transition-all",
+                                  u.isBlocked 
+                                    ? "bg-primary text-white shadow-lg shadow-primary/20" 
+                                    : "bg-rose-500 text-white shadow-lg shadow-rose-200"
+                                )}
+                              >
+                                {u.isBlocked ? <Check size={14} /> : <Ban size={14} />}
+                                {u.isBlocked ? 'إلغاء الحظر' : 'حظر المستخدم'}
+                              </button>
+                              <button 
+                                onClick={() => deleteUser(u.id)}
+                                className="p-2 bg-rose-50 dark:bg-rose-900/20 text-rose-500 rounded-xl hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-all"
+                                title="حذف المستخدم"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </td>
+                        </motion.tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {allUsers.length === 0 && (
+                    <div className="py-20 text-center opacity-20">
+                      <Users size={48} className="mx-auto mb-3" />
+                      <p className="text-sm font-black">لا يوجد مستخدمون مسجلون حالياً</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Club Subscriptions Tab */}
           {activeTab === 'club-subscriptions' && (
             <div className="space-y-8 mb-10">
@@ -5601,7 +5970,7 @@ function AppContent() {
                             <p className="text-xs font-bold text-gray-500 mt-1">تم قفل الاشتراك لانتهاء المدة</p>
                             <button 
                               onClick={() => updateClubSubStatus(sub.id, 'active')}
-                              className="mt-4 px-4 py-2 bg-emerald-500 text-white rounded-xl text-xs font-black"
+                              className="mt-4 px-4 py-2 bg-primary text-white rounded-xl text-xs font-black"
                             >
                               إعادة تفعيل
                             </button>
@@ -6317,7 +6686,7 @@ function AppContent() {
               </div>
               <div className="flex gap-2">
                 <div className="flex items-center gap-2 px-3 py-1 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 rounded-full text-xs font-bold">
-                  <div className="w-2 h-2 bg-emerald-500 rounded-full" />
+                  <div className="w-2 h-2 bg-primary rounded-full" />
                   مدفوع: {stats.paid}
                 </div>
                 <div className="flex items-center gap-2 px-3 py-1 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded-full text-xs font-bold">
