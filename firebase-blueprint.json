@@ -134,6 +134,19 @@
       },
       "required": ["contractId", "amount", "dueDate", "status"]
     },
+    "RentPayment": {
+      "title": "Rent Payment",
+      "description": "Historical or scheduled payment for a contract",
+      "type": "object",
+      "properties": {
+        "amount": { "type": "number" },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "paymentDate": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["pending", "paid", "overdue", "cancelled"] },
+        "notes": { "type": "string" }
+      },
+      "required": ["amount", "dueDate", "status"]
+    },
     "ClubSubscription": {
       "title": "Club Subscription",
       "description": "Details of a club membership subscription",
@@ -202,13 +215,13 @@
       "schema": "RealEstateApartment",
       "description": "Real estate apartments"
     },
-    "/contracts/{contractId}": {
+    "/tenants/{tenantId}": {
       "schema": "RealEstateContract",
-      "description": "Rental contracts"
+      "description": "Rental contracts (stored in tenants collection)"
     },
-    "/rentPayments/{paymentId}": {
-      "schema": "RealEstatePayment",
-      "description": "Rent payments"
+    "/tenants/{tenantId}/rentPayments/{paymentId}": {
+      "schema": "RentPayment",
+      "description": "Payments for a specific contract"
     },
     "/clubSubscriptions/{subId}": {
       "schema": "ClubSubscription",

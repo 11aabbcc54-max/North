@@ -15,16 +15,16 @@
 }
 
 :root {
-  --primary-color: #10B981;
-  --primary-color-dark: #059669;
+  --primary-color: #1e293b; /* Slate 800 - Formal Navy */
+  --primary-color-dark: #0f172a; /* Slate 900 */
 }
 
-[data-theme='emerald'] { --primary-color: #10B981; --primary-color-dark: #059669; }
-[data-theme='indigo'] { --primary-color: #8B5CF6; --primary-color-dark: #7C3AED; }
-[data-theme='blue'] { --primary-color: #3B82F6; --primary-color-dark: #2563EB; }
-[data-theme='rose'] { --primary-color: #EC4899; --primary-color-dark: #DB2777; }
-[data-theme='amber'] { --primary-color: #F59E0B; --primary-color-dark: #D97706; }
-[data-theme='slate'] { --primary-color: #334155; --primary-color-dark: #1E293B; }
+[data-theme='emerald'] { --primary-color: #0f766e; --primary-color-dark: #134e4a; }
+[data-theme='indigo'] { --primary-color: #312e81; --primary-color-dark: #1e1b4b; }
+[data-theme='blue'] { --primary-color: #1d4ed8; --primary-color-dark: #1e40af; }
+[data-theme='rose'] { --primary-color: #9f1239; --primary-color-dark: #881337; }
+[data-theme='amber'] { --primary-color: #92400e; --primary-color-dark: #78350f; }
+[data-theme='slate'] { --primary-color: #1e293b; --primary-color-dark: #0f172a; }
 
 @layer base {
   body {

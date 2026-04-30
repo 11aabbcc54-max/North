@@ -1,0 +1,109 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+             (request.auth.token.email == "11aabbcc54@gmail.com" && request.auth.token.email_verified == true);
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function isValidId(id) {
+       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Validation Helpers
+    function isValidTenant(data) {
+      let requiredFields = ['name', 'phone', 'nationality', 'company', 'apartmentId', 'startDate', 'endDate', 'contractValue'];
+      return data.keys().hasAll(requiredFields) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.phone is string && data.phone.size() > 0 && data.phone.size() < 50 &&
+             data.nationality is string &&
+             data.company is string &&
+             data.apartmentId is string &&
+             data.startDate is timestamp &&
+             data.endDate is timestamp &&
+             data.contractValue is number && data.contractValue >= 0 &&
+             (!('collectedAmount' in data) || data.collectedAmount is number) &&
+             (!('status' in data) || data.status in ['active', 'archived']);
+    }
+
+    function isValidRentPayment(data) {
+      let requiredFields = ['amount', 'dueDate', 'status'];
+      return data.keys().hasAll(requiredFields) &&
+             data.amount is number && data.amount >= 0 &&
+             data.dueDate is timestamp &&
+             (!('paymentDate' in data) || data.paymentDate is timestamp) &&
+             data.status in ['pending', 'paid', 'overdue', 'cancelled'] &&
+             (!('notes' in data) || data.notes is string && data.notes.size() < 1000);
+    }
+
+    // Collection Rules
+    match /users/{userId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /tenants/{tenantId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidTenant(incoming());
+      allow update: if isAuthenticated() && isValidTenant(incoming());
+      allow delete: if isAdmin();
+
+      // Subcollection: rentPayments
+      match /rentPayments/{paymentId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() && isValidRentPayment(incoming());
+        allow update: if isAuthenticated() && isValidRentPayment(incoming());
+        allow delete: if isAdmin();
+      }
+    }
+
+    // Keeping other collections open for now as they were, but slightly better
+    match /apartments/{apartmentId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    match /buildings/{buildingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    match /requests/{requestId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /inventory/{itemId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /inventoryLogs/{logId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /clubSubscriptions/{subId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /bookings/{bookingId} {
+      allow read, write: if isAuthenticated();
+    }
+  }
+}

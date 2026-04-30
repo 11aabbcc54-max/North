@@ -14,6 +14,7 @@ import {
 import { 
   onAuthStateChanged, 
   signInWithCustomToken,
+  signInAnonymously,
   signOut, 
   User 
 } from 'firebase/auth';
@@ -27,6 +28,7 @@ import {
   setDoc,
   doc, 
   deleteDoc, 
+  deleteField,
   Timestamp, 
   orderBy,
   limit,
@@ -41,9 +43,13 @@ import {
   Calendar, 
   CreditCard, 
   FileText, 
+  FileCheck,
   CheckCircle2, 
   Clock, 
   Trash2, 
+  Archive,
+  Phone,
+  IdCard,
   Share2, 
   Search,
   ChevronRight,
@@ -87,7 +93,8 @@ import {
   Globe,
   Users,
   Ban,
-  Bell
+  Bell,
+  ArrowRightLeft
 } from 'lucide-react';
 import { 
   format, 
@@ -203,6 +210,16 @@ interface Apartment {
   tenantId?: string;
 }
 
+interface RentPayment {
+  id: string;
+  amount: number;
+  dueDate: Timestamp;
+  paymentDate?: Timestamp;
+  status: 'pending' | 'paid' | 'overdue' | 'cancelled';
+  notes?: string;
+  createdAt: Timestamp;
+}
+
 interface Tenant {
   id: string;
   name: string;
@@ -219,6 +236,10 @@ interface Tenant {
   paymentMethod: string;
   nextPaymentDate: Timestamp;
   apartmentId: string;
+  receiptUrl?: string;
+  idImageUrl?: string;
+  collectedAmount: number;
+  status?: 'active' | 'archived';
 }
 
 const BUILDINGS = [
@@ -226,11 +247,11 @@ const BUILDINGS = [
 ];
 
 const PROPERTY_BUILDINGS = [
-  { id: 'b1', name: 'مبنى ١', apartments: ['101','102','103','104','105','106','107','108','109','110','111','112','113','114','115','116','117','118','119','120','121','122','123','124','125','126','127','128','129','131','132','133','134','135'] },
-  { id: 'b2', name: 'مبنى ٢', apartments: ['201','202','203','204','205','206','207','208','209','210','211','212','213','214','215','216','217','218','219','220','221','222','223','224','225','226','227','231','232','233'] },
-  { id: 'b3', name: 'مبنى ٣', apartments: ['311','312','313','314','315','316','317','318','319','321','322','323','324','325','326','327'] },
-  { id: 'b4', name: 'مبنى ٤', apartments: ['401','402','403','404','405','406','407','408','409','410','411','412','413','414','415','416','417','418','419','420','421','422','423','424','425','426','427','431','432','433'] },
-  { id: 'b5', name: 'مبنى ٥', apartments: ['501','502','503','504','505','506','507','508','509','510','511','512','513','514','515','516','517','518','519','520','521','522','523','524','525','526','527'] }
+  { id: 'b1', name: 'مبنى ١', apartments: Array.from({length: 34}, (_, i) => (i + 1).toString()) },
+  { id: 'b2', name: 'مبنى ٢', apartments: Array.from({length: 30}, (_, i) => (i + 35).toString()) },
+  { id: 'b3', name: 'مبنى ٣', apartments: Array.from({length: 16}, (_, i) => (i + 65).toString()) },
+  { id: 'b4', name: 'مبنى ٤', apartments: Array.from({length: 30}, (_, i) => (i + 81).toString()) },
+  { id: 'b5', name: 'مبنى ٥', apartments: Array.from({length: 27}, (_, i) => (i + 111).toString()) }
 ];
 
 const SERVICES = [
@@ -1934,6 +1955,329 @@ const FinancialDashboardModal = ({ isOpen, onClose, tenants, apartments }: any) 
   );
 };
 
+const RentPaymentsModal = ({ isOpen, onClose, tenant, payments, onAddPayment, onUpdateStatus, onDeletePayment, onGenerateSchedule }: any) => {
+  const [amount, setAmount] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [notes, setNotes] = useState('');
+
+  if (!isOpen || !tenant) return null;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!amount || !dueDate) {
+      toast.error('يرجى إكمال البيانات المطلوبة');
+      return;
+    }
+    onAddPayment(tenant.id, Number(amount), new Date(dueDate), notes);
+    setAmount('');
+    setDueDate('');
+    setNotes('');
+  };
+
+  return (
+    <AnimatePresence>
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[90] flex items-center justify-center p-4"
+        onClick={onClose}
+      >
+        <motion.div 
+          initial={{ scale: 0.9, y: 20 }}
+          animate={{ scale: 1, y: 0 }}
+          exit={{ scale: 0.9, y: 20 }}
+          onClick={(e) => e.stopPropagation()}
+          className="bg-white dark:bg-slate-900 rounded-[3rem] w-full max-w-4xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col font-cairo"
+        >
+          <div className="p-8 border-b dark:border-slate-800 flex items-center justify-between bg-gray-50/50 dark:bg-slate-800/50">
+            <div className="flex items-center gap-5">
+              <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center">
+                <DollarSign size={28} />
+              </div>
+              <div>
+                <h2 className="text-2xl font-black text-gray-900 dark:text-white">جدول مدفوعات المستأجر</h2>
+                <p className="text-gray-500 font-bold text-sm">{tenant.name} • قيمة العقد: {tenant.contractValue?.toLocaleString()} ر.س</p>
+              </div>
+            </div>
+            <button onClick={onClose} className="p-3 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-2xl transition-all">
+              <X size={24} className="text-gray-400" />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
+            <div className="grid md:grid-cols-3 gap-8">
+              <div className="md:col-span-2 space-y-6">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-black text-lg text-gray-900 dark:text-white">سجل الدفعات</h3>
+                  {payments.length === 0 && (
+                    <button 
+                      onClick={() => onGenerateSchedule(tenant)}
+                      className="text-primary font-black text-xs bg-primary/5 px-4 py-2 rounded-xl border border-primary/20 hover:bg-primary/10 transition-all"
+                    >
+                      توليد جدول ذكي
+                    </button>
+                  )}
+                </div>
+
+                <div className="space-y-4">
+                  {payments.map((payment: any) => (
+                    <div key={payment.id} className="bg-gray-50 dark:bg-slate-800/50 p-6 rounded-[2rem] border border-gray-100 dark:border-slate-800 flex items-center justify-between group">
+                      <div className="flex items-center gap-6">
+                        <div className={cn(
+                          "w-12 h-12 rounded-2xl flex items-center justify-center text-lg font-black",
+                          payment.status === 'paid' ? "bg-emerald-100 text-emerald-600" : "bg-amber-100 text-amber-600"
+                        )}>
+                          {payment.status === 'paid' ? <CheckCircle2 size={24} /> : <Clock size={24} />}
+                        </div>
+                        <div>
+                          <div className="font-black text-gray-900 dark:text-white text-lg">{payment.amount?.toLocaleString()} ر.س</div>
+                          <div className="text-[10px] font-bold text-gray-400 mt-1 flex items-center gap-2">
+                             <span>تاريخ الاستحقاق: {format(safeToDate(payment.dueDate), 'yyyy/MM/dd')}</span>
+                             {payment.paymentDate && (
+                               <span className="text-emerald-500">• دفع في: {format(safeToDate(payment.paymentDate), 'yyyy/MM/dd')}</span>
+                             )}
+                          </div>
+                          {payment.notes && <p className="text-[10px] text-gray-500 mt-1 italic opacity-70">"{payment.notes}"</p>}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {payment.status === 'pending' && (
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            onClick={() => onUpdateStatus(tenant.id, payment.id, 'paid')}
+                            className="bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-black shadow-lg shadow-emerald-200"
+                          >
+                            تحديد كمدفوع
+                          </motion.button>
+                        )}
+                        {payment.status === 'paid' && (
+                          <button
+                            onClick={() => onUpdateStatus(tenant.id, payment.id, 'pending')}
+                            className="text-amber-600 bg-amber-50 px-4 py-2 rounded-xl text-xs font-black hover:bg-amber-100 transition-all"
+                          >
+                            إلغاء التحصيل
+                          </button>
+                        )}
+                        <button
+                          onClick={() => onDeletePayment(tenant.id, payment.id)}
+                          className="p-2 text-gray-300 hover:text-rose-500 transition-all opacity-0 group-hover:opacity-100"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {payments.length === 0 && (
+                    <div className="py-12 text-center bg-gray-50 dark:bg-slate-800/30 rounded-[2.5rem] border border-dashed border-gray-200 dark:border-slate-800">
+                      <div className="text-gray-400 font-bold">لا توجد دفعات مسجلة بعد</div>
+                      <p className="text-[10px] text-gray-400 mt-2">استخدم النموذج لإضافة دفعة أو الخيار الذكي لتوليد الجدول</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                <div className="bg-emerald-50 dark:bg-emerald-900/10 p-8 rounded-[2.5rem] border border-emerald-100 dark:border-emerald-800">
+                  <h3 className="font-black text-gray-900 dark:text-white mb-6 flex items-center gap-3">
+                    <Plus size={18} className="text-emerald-500" />
+                    إضافة دفعة يدوية
+                  </h3>
+                  <form onSubmit={handleSubmit} className="space-y-5">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-1">المبلغ</label>
+                      <input 
+                        type="number"
+                        value={amount}
+                        onChange={(e) => setAmount(e.target.value)}
+                        className="w-full p-4 bg-white dark:bg-slate-800 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 text-sm font-bold"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-1">تاريخ الاستحقاق</label>
+                      <input 
+                        type="date"
+                        value={dueDate}
+                        onChange={(e) => setDueDate(e.target.value)}
+                        className="w-full p-4 bg-white dark:bg-slate-800 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 text-sm font-bold"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-1">ملاحظات</label>
+                      <textarea 
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        className="w-full p-4 bg-white dark:bg-slate-800 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 text-sm font-bold h-24"
+                        placeholder="اختياري..."
+                      />
+                    </div>
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      type="submit"
+                      className="w-full py-4 bg-emerald-500 text-white rounded-[1.5rem] font-black text-sm shadow-xl shadow-emerald-200 hover:bg-emerald-600 transition-all mt-4"
+                    >
+                      إضافة للجدول
+                    </motion.button>
+                  </form>
+                </div>
+
+                <div className="bg-gray-900 p-8 rounded-[2.5rem] text-white">
+                  <h3 className="font-black mb-6 flex items-center gap-3">
+                    <PieChart size={18} className="text-primary" />
+                    خلاصة الدفعات
+                  </h3>
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-400">إجمالي العقد</span>
+                      <span className="font-black">{tenant.contractValue?.toLocaleString()} ر.س</span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-400">المبلغ المحصل</span>
+                      <span className="font-black text-emerald-400">{tenant.collectedAmount?.toLocaleString()} ر.س</span>
+                    </div>
+                    <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-emerald-500" 
+                        style={{ width: `${Math.min(100, (tenant.collectedAmount / (tenant.contractValue || 1)) * 100)}%` }} 
+                      />
+                    </div>
+                    <div className="flex justify-between items-center text-sm pt-2 border-t border-white/10">
+                      <span className="text-gray-400">المتبقي</span>
+                      <span className="font-black text-rose-400">{Math.max(0, tenant.contractValue - tenant.collectedAmount).toLocaleString()} ر.س</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+};
+
+const MoveTenantModal = ({ isOpen, onClose, tenant, apartments, onMove }: any) => {
+  const [selectedAptId, setSelectedAptId] = useState('');
+  const [selectedBuilding, setSelectedBuilding] = useState('all');
+
+  if (!isOpen || !tenant) return null;
+
+  const currentApt = apartments.find((a: any) => a.id === tenant.apartmentId);
+
+  const availableApts = apartments.filter((a: any) => 
+    a.status === 'vacant' && 
+    (selectedBuilding === 'all' || a.buildingId === selectedBuilding)
+  );
+
+  return (
+    <AnimatePresence>
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[90] flex items-center justify-center p-4"
+        onClick={onClose}
+      >
+        <motion.div 
+          initial={{ scale: 0.9, y: 20 }}
+          animate={{ scale: 1, y: 0 }}
+          exit={{ scale: 0.9, y: 20 }}
+          onClick={(e) => e.stopPropagation()}
+          className="bg-white dark:bg-slate-900 rounded-[3rem] w-full max-w-lg overflow-hidden shadow-2xl flex flex-col font-cairo shadow-purple-500/10 border border-purple-100/20"
+        >
+          <div className="p-8 border-b dark:border-slate-800 flex items-center justify-between bg-purple-50/50 dark:bg-purple-900/10">
+            <div className="flex items-center gap-5">
+              <div className="w-14 h-14 bg-purple-100 text-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-purple-200/50">
+                <ArrowRightLeft size={28} />
+              </div>
+              <div>
+                <h2 className="text-2xl font-black text-gray-900 dark:text-white">نقل المستأجر</h2>
+                <p className="text-gray-500 font-bold text-sm">نقل من الشقة الحالية إلى شقة شاغرة</p>
+              </div>
+            </div>
+            <button onClick={onClose} className="p-3 hover:bg-white dark:hover:bg-slate-800 rounded-2xl transition-all border border-transparent hover:border-purple-100">
+              <X size={24} className="text-gray-400" />
+            </button>
+          </div>
+
+          <div className="p-8 space-y-8">
+            <div className="bg-gray-50 dark:bg-slate-800/50 p-6 rounded-[2rem] border border-gray-100 dark:border-slate-800">
+              <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-4">المستأجر الحالي</div>
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-purple-500 text-white rounded-xl flex items-center justify-center font-black text-lg">
+                  {tenant.name.charAt(0)}
+                </div>
+                <div>
+                  <div className="font-black text-gray-900 dark:text-white">{tenant.name}</div>
+                  <div className="text-[10px] font-bold text-purple-500">الشقة الحالية: {currentApt?.number || 'غير محدد'} ({PROPERTY_BUILDINGS.find(b => b.id === currentApt?.buildingId)?.name || 'مبنى'})</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between px-1">
+                <label className="text-[11px] font-black text-gray-500 uppercase tracking-widest">اختر الشقة الجديدة</label>
+                <select 
+                  value={selectedBuilding}
+                  onChange={(e) => setSelectedBuilding(e.target.value)}
+                  className="text-[10px] font-black text-purple-600 bg-purple-50 border-none rounded-lg px-3 py-1 outline-none"
+                >
+                  <option value="all">كل المباني</option>
+                  {PROPERTY_BUILDINGS.map(b => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                {availableApts.map((apt: any) => (
+                  <button
+                    key={apt.id}
+                    onClick={() => setSelectedAptId(apt.id)}
+                    className={cn(
+                      "p-4 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-1",
+                      selectedAptId === apt.id 
+                        ? "bg-purple-500 border-purple-600 text-white shadow-lg shadow-purple-200" 
+                        : "bg-white dark:bg-slate-800 border-gray-100 dark:border-slate-700 text-gray-900 dark:text-white hover:border-purple-300"
+                    )}
+                  >
+                    <span className="text-sm font-black">{apt.number}</span>
+                    <span className={cn(
+                      "text-[8px] font-bold uppercase",
+                      selectedAptId === apt.id ? "text-purple-100" : "text-gray-400"
+                    )}>{PROPERTY_BUILDINGS.find(b => b.id === apt.buildingId)?.name}</span>
+                  </button>
+                ))}
+                {availableApts.length === 0 && (
+                  <div className="col-span-3 py-10 text-center text-gray-400 font-bold text-sm bg-gray-50 rounded-2xl border border-dashed">
+                    لا توجد شقق شاغرة في هذا المبنى
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <button
+              disabled={!selectedAptId}
+              onClick={() => onMove(tenant, selectedAptId)}
+              className={cn(
+                "w-full py-5 rounded-[2rem] font-black text-sm transition-all shadow-xl",
+                selectedAptId 
+                  ? "bg-purple-600 text-white shadow-purple-200 hover:bg-purple-700 hover:scale-[1.02] active:scale-[0.98]" 
+                  : "bg-gray-100 text-gray-400 cursor-not-allowed"
+              )}
+            >
+              تأكيد النقل الآن
+            </button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+};
+
 const TenantModal = ({ isOpen, onClose, onSave, initialData, apartments }: any) => {
   const [formData, setFormData] = useState<any>({
     name: '',
@@ -1947,8 +2291,40 @@ const TenantModal = ({ isOpen, onClose, onSave, initialData, apartments }: any) 
     nextPaymentDate: format(addDays(new Date(), 30), 'yyyy-MM-dd'),
     paymentFrequency: 'monthly',
     paymentMethod: 'cash',
-    apartmentId: ''
+    apartmentId: '',
+    receiptUrl: '',
+    idImageUrl: ''
   });
+
+  const handleReceiptUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 800000) {
+        toast.error('حجم الملف كبير جداً. يرجى اختيار صورة أصغر من 800 كيلوبايت.');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setFormData({ ...formData, receiptUrl: reader.result as string });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleIdUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 800000) {
+        toast.error('حجم الملف كبير جداً. يرجى اختيار صورة أصغر من 800 كيلوبايت.');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setFormData({ ...formData, idImageUrl: reader.result as string });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   useEffect(() => {
     if (initialData) {
@@ -1970,7 +2346,9 @@ const TenantModal = ({ isOpen, onClose, onSave, initialData, apartments }: any) 
       startDate: Timestamp.fromDate(new Date(formData.startDate)),
       endDate: Timestamp.fromDate(new Date(formData.endDate)),
       nextPaymentDate: Timestamp.fromDate(new Date(formData.nextPaymentDate)),
-      contractValue: Number(formData.contractValue)
+      contractValue: Number(formData.contractValue),
+      collectedAmount: Number(formData.collectedAmount || 0),
+      status: formData.status || 'active'
     });
   };
 
@@ -1993,7 +2371,7 @@ const TenantModal = ({ isOpen, onClose, onSave, initialData, apartments }: any) 
               <Users size={24} />
             </div>
             <div>
-              <h2 className="text-2xl font-black tracking-tight">{initialData ? 'تعديل بيانات المستأجر' : 'إضافة مستأجر جديد'}</h2>
+              <h2 className="text-2xl font-black tracking-tight">{initialData ? 'تعديل بيانات العقد' : 'إضافة عقد جديد'}</h2>
               <p className="text-white/70 font-bold">يرجى إدخال كافة تفاصيل العقد والمستأجر</p>
             </div>
           </div>
@@ -2080,6 +2458,26 @@ const TenantModal = ({ isOpen, onClose, onSave, initialData, apartments }: any) 
                 />
               </div>
               <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-1">المبلغ المحصل</label>
+                <input 
+                  type="number"
+                  className="w-full p-4 bg-emerald-50/50 dark:bg-emerald-900/10 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 text-sm font-bold transition-all"
+                  value={formData.collectedAmount}
+                  onChange={e => setFormData({...formData, collectedAmount: e.target.value})}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-1">حالة العقد</label>
+                <select 
+                  className="w-full p-4 bg-gray-50 dark:bg-slate-800 border-none rounded-2xl focus:ring-2 focus:ring-primary text-sm font-bold transition-all appearance-none"
+                  value={formData.status}
+                  onChange={e => setFormData({...formData, status: e.target.value as any})}
+                >
+                  <option value="active">نشط</option>
+                  <option value="archived">مؤرشف</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
                 <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-1">بداية العقد</label>
                 <input 
                   type="date"
@@ -2102,6 +2500,74 @@ const TenantModal = ({ isOpen, onClose, onSave, initialData, apartments }: any) 
             </div>
           </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
+            <div className="space-y-3">
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-1 block">ارفاق الهوية</label>
+              <div className="flex items-center gap-4">
+                <label className="flex-1 cursor-pointer group">
+                  <div className="w-full p-6 border-2 border-dashed border-gray-200 dark:border-slate-700 rounded-3xl group-hover:border-primary group-hover:bg-primary/5 transition-all flex flex-col items-center justify-center gap-3">
+                    {formData.idImageUrl ? (
+                      <img src={formData.idImageUrl} alt="ID" className="w-full max-h-48 object-contain rounded-xl" />
+                    ) : (
+                      <>
+                        <div className="w-12 h-12 bg-gray-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center text-gray-400 group-hover:text-primary transition-all">
+                          <CreditCard size={24} />
+                        </div>
+                        <div className="text-center">
+                          <p className="text-sm font-black text-gray-700 dark:text-gray-300">اضغط لرفع الهوية</p>
+                          <p className="text-[10px] text-gray-400">JPG, PNG (Max 800KB)</p>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <input type="file" accept="image/*" className="hidden" onChange={handleIdUpload} />
+                </label>
+                {formData.idImageUrl && (
+                  <button 
+                    type="button"
+                    onClick={() => setFormData({...formData, idImageUrl: ''})}
+                    className="p-3 bg-rose-50 text-rose-500 rounded-2xl hover:bg-rose-100 transition-all border border-rose-100"
+                  >
+                    <Trash2 size={24} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-1 block">إيصال الدفع / العقد</label>
+              <div className="flex items-center gap-4">
+                <label className="flex-1 cursor-pointer group">
+                  <div className="w-full p-6 border-2 border-dashed border-gray-200 dark:border-slate-700 rounded-3xl group-hover:border-primary group-hover:bg-primary/5 transition-all flex flex-col items-center justify-center gap-3">
+                    {formData.receiptUrl ? (
+                      <img src={formData.receiptUrl} alt="Receipt" className="w-full max-h-48 object-contain rounded-xl" />
+                    ) : (
+                      <>
+                        <div className="w-12 h-12 bg-gray-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center text-gray-400 group-hover:text-primary transition-all">
+                          <Upload size={24} />
+                        </div>
+                        <div className="text-center">
+                          <p className="text-sm font-black text-gray-700 dark:text-gray-300">اضغط لرفع الإيصال</p>
+                          <p className="text-[10px] text-gray-400">JPG, PNG (Max 800KB)</p>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <input type="file" accept="image/*" className="hidden" onChange={handleReceiptUpload} />
+                </label>
+                {formData.receiptUrl && (
+                  <button 
+                    type="button"
+                    onClick={() => setFormData({...formData, receiptUrl: ''})}
+                    className="p-3 bg-rose-50 text-rose-500 rounded-2xl hover:bg-rose-100 transition-all border border-rose-100"
+                  >
+                    <Trash2 size={24} />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div className="pt-6 flex gap-4">
             <motion.button 
               whileHover={{ scale: 1.02 }}
@@ -2109,7 +2575,7 @@ const TenantModal = ({ isOpen, onClose, onSave, initialData, apartments }: any) 
               type="submit"
               className="flex-1 bg-primary text-white py-4 rounded-2xl font-black text-base shadow-xl shadow-primary/20 transition-all"
             >
-              حفظ بيانات المستأجر
+              حفظ بيانات العقد
             </motion.button>
             <motion.button 
               whileHover={{ scale: 1.02 }}
@@ -2417,8 +2883,8 @@ const ClubSubscriptionModal = ({
                   className={cn(
                     "py-4 rounded-2xl font-black text-sm transition-all border-2",
                     newClubSub.paymentStatus === status
-                      ? "bg-blue-500 text-white border-blue-500 shadow-lg shadow-blue-200"
-                      : "bg-gray-50 dark:bg-slate-800 text-gray-500 border-transparent hover:border-blue-500/30"
+                      ? "bg-primary text-white border-primary shadow-lg shadow-primary/20"
+                      : "bg-gray-50 dark:bg-slate-800 text-gray-500 border-transparent hover:border-primary/30"
                   )}
                 >
                   {status === 'paid' ? 'تم التحصيل' : 'لم يتم التحصيل'}
@@ -2786,6 +3252,17 @@ function AppContent() {
   const [isTenantModalOpen, setIsTenantModalOpen] = useState(false);
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const aptFileInputRef = useRef<HTMLInputElement>(null);
+  const [tenantSearch, setTenantSearch] = useState('');
+  const [tenantFilter, setTenantFilter] = useState<'active' | 'archived'>('active');
+  const [tenantSortField, setTenantSortField] = useState<keyof Tenant | 'aptNumber'>('name');
+  const [tenantSortDirection, setTenantSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [tenantBuildingFilter, setTenantBuildingFilter] = useState('all');
+  const [selectedTenantForPayments, setSelectedTenantForPayments] = useState<Tenant | null>(null);
+  const [movingTenant, setMovingTenant] = useState<Tenant | null>(null);
+  const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
+  const [tenantPayments, setTenantPayments] = useState<RentPayment[]>([]);
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [tenantForm, setTenantForm] = useState<Partial<Tenant>>({
     name: '',
     nationality: '',
@@ -2793,8 +3270,10 @@ function AppContent() {
     company: '',
     idNumber: '',
     contractValue: 0,
+    collectedAmount: 0,
     paymentFrequency: 'monthly',
-    paymentMethod: 'cash'
+    paymentMethod: 'cash',
+    status: 'active'
   });
   const [editingClubSub, setEditingClubSub] = useState<ClubSubscription | null>(null);
   const [clubSubBuildingFilter, setClubSubBuildingFilter] = useState('all');
@@ -2844,7 +3323,7 @@ function AppContent() {
     ...BUILDINGS.map(b => ({ id: b, label: b, icon: Home })),
     { id: 'تنظيف سيارات', label: 'تنظيف السيارات', icon: Car },
     { id: 'property-units', label: 'إدارة الوحدات', icon: Home },
-    { id: 'tenants', label: 'المستأجرون', icon: Users },
+    { id: 'tenants', label: 'العقود', icon: FileCheck },
     { id: 'property-alerts', label: 'تنبيهات العقود', icon: Bell },
     { id: 'users', label: 'إدارة المستخدمين', icon: Users },
     { id: 'settings', label: 'إعدادات الهوية', icon: Settings }
@@ -2853,6 +3332,25 @@ function AppContent() {
     const userPerms = (user as any)?.permissions || [];
     return userPerms.includes(item.id);
   });
+
+  useEffect(() => {
+    if (selectedTenantForPayments) {
+      const q = query(
+        collection(db, 'tenants', selectedTenantForPayments.id, 'rentPayments'),
+        orderBy('dueDate', 'asc')
+      );
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const payments = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as RentPayment[];
+        setTenantPayments(payments);
+      }, (error) => {
+        handleFirestoreError(error, OperationType.GET, `tenants/${selectedTenantForPayments.id}/rentPayments`);
+      });
+      return () => unsubscribe();
+    }
+  }, [selectedTenantForPayments]);
 
   useEffect(() => {
     if (searchTerm.trim() !== '') {
@@ -2908,6 +3406,22 @@ function AppContent() {
       unsubscribeTenants();
     };
   }, [user]);
+
+  useEffect(() => {
+    if (user && tenants.length > 0) {
+      const expiring = getExpiringContracts(30);
+      if (expiring.length > 0) {
+        toast.error(`تنبيه العقود: يوجد ${expiring.length} عقد منتهي أو يقترب من الانتهاء`, {
+          description: 'يرجى مراجعة قسم تنبيهات العقود لاتخاذ الإجراءات اللازمة.',
+          duration: 8000,
+          action: {
+            label: 'عرض التنبيهات',
+            onClick: () => setActiveTab('property-alerts')
+          },
+        });
+      }
+    }
+  }, [user, tenants.length > 0]);
 
   const updateBranding = async (name: string, logo: string | null, background: string | null, color: string, opacity: number) => {
     try {
@@ -3302,11 +3816,6 @@ function AppContent() {
   }, [selectedMonth]);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('fyozr_user');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-    }
-
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       if (u) {
         try {
@@ -3316,10 +3825,6 @@ function AppContent() {
             const userData = userSnap.data();
             const fullUser = { ...u, ...userData, id: userSnap.id };
             setUser(fullUser as any);
-            if (userData.role === 'admin') {
-              // Also save to localStorage for consistency if needed, 
-              // but Firebase Auth handles its own persistence.
-            }
           } else {
             setUser(u);
           }
@@ -3329,7 +3834,14 @@ function AppContent() {
         }
       } else {
         const customUser = localStorage.getItem('fyozr_user');
-        if (!customUser) {
+        if (customUser) {
+          try {
+            setUser(JSON.parse(customUser));
+          } catch (e) {
+            setUser(null);
+            localStorage.removeItem('fyozr_user');
+          }
+        } else {
           setUser(null);
         }
       }
@@ -3480,7 +3992,7 @@ function AppContent() {
       for (const b of PROPERTY_BUILDINGS) {
         for (const num of b.apartments) {
           const aptId = `${b.id}-${num}`;
-          const isTwoBedroom = ['105', '106', '110', '115', '116', '120', '125', '126', '129', '134', '135', '206', '210', '211', '221', '226', '227', '314', '315', '321', '325', '326', '327', '406', '410', '415', '416', '425', '426', '427', '501', '505', '511', '515', '521', '522'].includes(num);
+          const isTwoBedroom = parseInt(num) % 4 === 0 || parseInt(num) % 7 === 0;
           
           await setDoc(doc(db, 'apartments', aptId), {
             buildingId: b.id,
@@ -3499,11 +4011,12 @@ function AppContent() {
   };
 
   const getExpiringContracts = (days: number) => {
-    const now = new Date();
+    const now = startOfDay(new Date());
     const limitDate = addDays(now, days);
     return tenants.filter(t => {
       const end = safeToDate(t.endDate);
-      return end >= now && end <= limitDate;
+      // Include already expired AND those expiring within the next 'days' days
+      return end <= limitDate;
     }).sort((a, b) => safeToDate(a.endDate).getTime() - safeToDate(b.endDate).getTime());
   };
 
@@ -3514,9 +4027,120 @@ function AppContent() {
         await updateDoc(doc(db, 'apartments', tenant.apartmentId), { status: 'vacant', tenantId: null });
       }
       await deleteDoc(doc(db, 'tenants', tenantId));
-      toast.success('تم حذف المستأجر بنجاح');
+      toast.success('تم حذف العقد بنجاح');
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `tenants/${tenantId}`);
+    }
+  };
+
+  const addRentPayment = async (tenantId: string, amount: number, dueDate: Date, notes: string = '') => {
+    try {
+      await addDoc(collection(db, 'tenants', tenantId, 'rentPayments'), {
+        amount,
+        dueDate: Timestamp.fromDate(dueDate),
+        status: 'pending',
+        notes,
+        createdAt: Timestamp.now()
+      });
+      toast.success('تم إضافة موعد الدفع بنجاح');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `tenants/${tenantId}/rentPayments`);
+    }
+  };
+
+  const updateRentPaymentStatus = async (tenantId: string, paymentId: string, newStatus: 'paid' | 'pending' | 'overdue' | 'cancelled') => {
+    try {
+      const paymentRef = doc(db, 'tenants', tenantId, 'rentPayments', paymentId);
+      const updateData: any = { status: newStatus };
+      if (newStatus === 'paid') {
+        updateData.paymentDate = Timestamp.now();
+      } else {
+        updateData.paymentDate = deleteField();
+      }
+      await updateDoc(paymentRef, updateData);
+      
+      const paymentsQuery = await getDocs(collection(db, 'tenants', tenantId, 'rentPayments'));
+      const totalCollected = paymentsQuery.docs.reduce((sum, doc) => {
+        const data = doc.data();
+        return data.status === 'paid' ? sum + (data.amount || 0) : sum;
+      }, 0);
+
+      await updateDoc(doc(db, 'tenants', tenantId), { collectedAmount: totalCollected });
+      toast.success('تم تحديث حالة الدفع');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `tenants/${tenantId}/rentPayments/${paymentId}`);
+    }
+  };
+
+  const deleteRentPayment = async (tenantId: string, paymentId: string) => {
+    if (!confirm('هل أنت متأكد من حذف هذا السجل؟')) return;
+    try {
+      await deleteDoc(doc(db, 'tenants', tenantId, 'rentPayments', paymentId));
+      const paymentsQuery = await getDocs(collection(db, 'tenants', tenantId, 'rentPayments'));
+      const totalCollected = paymentsQuery.docs.reduce((sum, doc) => {
+        const data = doc.data();
+        return data.status === 'paid' ? sum + (data.amount || 0) : sum;
+      }, 0);
+      await updateDoc(doc(db, 'tenants', tenantId), { collectedAmount: totalCollected });
+      toast.success('تم حذف السجل');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `tenants/${tenantId}/rentPayments/${paymentId}`);
+    }
+  };
+
+  const generatePaymentSchedule = async (tenant: Tenant) => {
+    if (!confirm('سيقوم هذا بإنشاء جدول دفعات بناءً على قيمة العقد. هل تريد المتابعة؟')) return;
+    try {
+      const { contractValue, paymentFrequency, startDate } = tenant;
+      let monthInterval = 1;
+      if (paymentFrequency === 'quarterly') monthInterval = 3;
+      if (paymentFrequency === 'yearly') monthInterval = 12;
+      const numPayments = Math.ceil(12 / monthInterval); 
+      const perPaymentAmount = contractValue / numPayments;
+      const baseDate = safeToDate(startDate);
+      for (let i = 0; i < numPayments; i++) {
+        const dueDate = addMonths(baseDate, i * monthInterval);
+        await addDoc(collection(db, 'tenants', tenant.id, 'rentPayments'), {
+          amount: perPaymentAmount,
+          dueDate: Timestamp.fromDate(dueDate),
+          status: 'pending',
+          createdAt: Timestamp.now()
+        });
+      }
+      toast.success('تم توليد جدول الدفعات بنجاح');
+    } catch (error) {
+      console.error(error);
+      toast.error('حدث خطأ أثناء توليد الجدول');
+    }
+  };
+
+  const moveTenantToApartment = async (tenant: Tenant, newApartmentId: string) => {
+    try {
+      const oldApartmentId = tenant.apartmentId;
+      
+      // Update Tenant
+      await updateDoc(doc(db, 'tenants', tenant.id), { apartmentId: newApartmentId });
+      
+      // Update Old Apartment
+      if (oldApartmentId) {
+        await updateDoc(doc(db, 'apartments', oldApartmentId), { 
+          status: 'vacant',
+          tenantId: deleteField()
+        });
+      }
+      
+      // Update New Apartment
+      await updateDoc(doc(db, 'apartments', newApartmentId), { 
+        status: 'occupied',
+        tenantId: tenant.id
+      });
+
+      toast.success('تم نقل المستأجر بنجاح');
+      setIsMoveModalOpen(false);
+      setMovingTenant(null);
+    } catch (error) {
+       console.error(error);
+       toast.error('حدث خطأ أثناء نقل المستأجر');
     }
   };
 
@@ -3524,7 +4148,7 @@ function AppContent() {
     try {
       if (editingTenant) {
         await updateDoc(doc(db, 'tenants', editingTenant.id), data);
-        toast.success('تم تحديث بيانات المستأجر');
+        toast.success('تم تحديث بيانات العقد');
       } else {
         const docRef = await addDoc(collection(db, 'tenants'), data);
         // Update apartment status
@@ -3534,7 +4158,7 @@ function AppContent() {
             tenantId: docRef.id 
           });
         }
-        toast.success('تم إضافة المستأجر بنجاح');
+        toast.success('تم إضافة العقد بنجاح');
       }
       setIsTenantModalOpen(false);
     } catch (error) {
@@ -3549,8 +4173,8 @@ function AppContent() {
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
-        const bstr = event.target?.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
+        const dataBuffer = event.target?.result;
+        const wb = XLSX.read(dataBuffer, { type: 'array' });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
         const data = XLSX.utils.sheet_to_json(ws) as any[];
@@ -3562,36 +4186,129 @@ function AppContent() {
 
         for (const row of data) {
           try {
-            const name = row['الاسم'] || row['Name'];
+            const name = row['المستأجر'] || row['الاسم'] || row['Name'] || row['Full Name'];
             const nationality = row['الجنسية'] || row['Nationality'] || '';
-            const phone = row['الهاتف'] || row['Phone'] || '';
+            const phone = String(row['الجوال'] || row['الهاتف'] || row['Phone'] || '');
             const company = row['الشركة'] || row['Company'] || '';
-            const idNumber = String(row['رقم الهوية'] || row['ID Number'] || '');
-            const aptNumber = String(row['رقم الشقة'] || row['Apartment Number'] || '');
-            const buildingName = row['اسم المبنى'] || row['Building Name'] || '';
-            const contractValue = Number(row['قيمة العقد'] || row['Contract Value'] || 0);
+            const idNumber = String(row['رقم الهوية'] || row['ID Number'] || row['ID'] || '');
+            const aptNumber = String(row['الشقة'] || row['رقم الشقة'] || row['Apartment Number'] || row['Unit Number'] || '');
+            const buildingName = row['المبنى'] || row['اسم المبنى'] || row['Building Name'] || '';
+            const contractValue = Number(row['قيمة العقد'] || row['Contract Value'] || row['Amount'] || 0);
+            const collectedAmount = Number(row['المبلغ المحصل'] || row['Collected Amount'] || 0);
+            const status = row['الحالة'] === 'مؤرشف' ? 'archived' : 'active';
             const startDateStr = row['بداية العقد'] || row['Start Date'];
             const endDateStr = row['نهاية العقد'] || row['End Date'];
             const paymentFrequency = row['تكرار الدفع'] || row['Payment Frequency'] || 'monthly';
             const paymentMethod = row['طريقة الدفع'] || row['Payment Method'] || 'cash';
 
-            if (!name || !aptNumber || !buildingName) continue;
+            if (!name || !aptNumber || !buildingName) {
+              console.warn('Skipping row due to missing required fields:', row);
+              continue;
+            }
 
-            const apt = apartments.find(a => a.number === aptNumber && a.buildingName === buildingName);
+            // Map payment frequency to standardized values
+            let freq = paymentFrequency.toString().toLowerCase();
+            if (freq.includes('شهر') || freq === 'monthly') freq = 'monthly';
+            else if (freq.includes('سنة') || freq === 'yearly' || freq === 'annual') freq = 'yearly';
+            else if (freq.includes('ربع') || freq === 'quarterly') freq = 'quarterly';
+            else if (freq.includes('نصف') || freq === 'half-yearly') freq = 'semi-annual';
+            else freq = 'monthly';
+
+            // Find matching apartment with normalized comparison
+            const normalize = (s: any) => {
+              if (s === undefined || s === null) return "";
+              return String(s)
+                .replace(/[\u0660-\u0669]/g, d => (d.charCodeAt(0) - 0x0660).toString()) // Arabic-Indic digits
+                .replace(/[\u06F0-\u06F9]/g, d => (d.charCodeAt(0) - 0x06F0).toString()) // Eastern Arabic-Indic digits
+                .replace(/[يى]/g, 'ى')
+                .replace(/[أإآا]/g, 'ا')
+                .replace(/ة/g, 'ه')
+                .replace(/\s+/g, "")
+                .trim()
+                .toLowerCase();
+            };
+
+            const searchAptNum = normalize(aptNumber);
+            const searchBuildingName = normalize(buildingName);
+
+            let apt = apartments.find(a => {
+              const dbAptNum = normalize(a.number);
+              const dbBuildingName = normalize(a.buildingName);
+              
+              return dbAptNum === searchAptNum && 
+                (dbBuildingName === searchBuildingName || 
+                 dbBuildingName.includes(searchBuildingName) || 
+                 searchBuildingName.includes(dbBuildingName));
+            });
+
+            // Fallback: If not found in current state, try to find in constant and create if valid
             if (!apt) {
-              console.error(`Apartment ${aptNumber} in ${buildingName} not found`);
+              const buildingConst = PROPERTY_BUILDINGS.find(b => {
+                const constName = normalize(b.name);
+                const constId = normalize(b.id);
+                return constName === searchBuildingName || 
+                       searchBuildingName.includes(constName) || 
+                       constName.includes(searchBuildingName) ||
+                       searchBuildingName === constId;
+              });
+
+              if (buildingConst && buildingConst.apartments.includes(searchAptNum)) {
+                const aptId = `${buildingConst.id}-${searchAptNum}`;
+                const isTwoBedroom = ['105', '106', '110', '115', '116', '120', '125', '126', '129', '134', '135', '206', '210', '211', '221', '226', '227', '314', '315', '321', '325', '326', '327', '406', '410', '415', '416', '425', '426', '427', '501', '505', '511', '515', '521', '522'].includes(searchAptNum);
+                
+                const newApt = {
+                  buildingId: buildingConst.id,
+                  buildingName: buildingConst.name,
+                  number: searchAptNum,
+                  status: 'vacant',
+                  roomType: isTwoBedroom ? 'غرفتين و صالة' : 'غرفة و صالة'
+                };
+                
+                await setDoc(doc(db, 'apartments', aptId), newApt);
+                apt = { id: aptId, ...newApt };
+              }
+            }
+
+            if (!apt) {
+              if (apartments.length === 0) {
+                console.error("لا يوجد وحدات في النظام. يرجى تهيئة بيانات العقارات أولاً.");
+                toast.error("يرجى تهيئة بيانات العقارات من قسم إدارة الوحدات قبل الاستيراد");
+                errorCount = data.length;
+                break;
+              }
+              console.error(`الشقة رقم ${aptNumber} في ${buildingName} غير موجودة`);
               errorCount++;
               continue;
             }
 
             const parseDate = (dateVal: any) => {
               if (!dateVal) return Timestamp.now();
+              
+              // Handle Excel serial dates
               if (typeof dateVal === 'number') {
-                const date = new Date((dateVal - (25567 + 1)) * 86400 * 1000);
+                const date = new Date((dateVal - 25569) * 86400 * 1000);
                 return Timestamp.fromDate(date);
               }
+              
+              // Handle string dates
               const date = new Date(dateVal);
-              return isNaN(date.getTime()) ? Timestamp.now() : Timestamp.fromDate(date);
+              if (!isNaN(date.getTime())) {
+                return Timestamp.fromDate(date);
+              }
+
+              // Try parsing common formats like DD/MM/YYYY
+              if (typeof dateVal === 'string' && dateVal.includes('/')) {
+                const parts = dateVal.split('/');
+                if (parts.length === 3) {
+                  const d = parseInt(parts[0], 10);
+                  const m = parseInt(parts[1], 10) - 1;
+                  const y = parseInt(parts[2], 10);
+                  const parsed = new Date(y, m, d);
+                  if (!isNaN(parsed.getTime())) return Timestamp.fromDate(parsed);
+                }
+              }
+
+              return Timestamp.now();
             };
 
             const startDate = parseDate(startDateStr);
@@ -3604,7 +4321,9 @@ function AppContent() {
               company,
               idNumber,
               contractValue,
-              paymentFrequency,
+              collectedAmount,
+              status,
+              paymentFrequency: freq,
               paymentMethod,
               startDate,
               endDate,
@@ -3628,17 +4347,96 @@ function AppContent() {
         toast.dismiss();
         if (importedCount > 0) {
           toast.success(`تم استيراد ${importedCount} مستأجر بنجاح`);
+        } else if (errorCount === 0) {
+          toast.info('لم يتم العثور على بيانات صالحة للاستيراد');
         }
+        
         if (errorCount > 0) {
-          toast.error(`فشل استيراد ${errorCount} سجل`);
+          toast.error(`فشل استيراد ${errorCount} سجل. تأكد من مطابقة أرقام الشقق والمباني.`);
         }
       } catch (error) {
         console.error(error);
-        toast.error('حدث خطأ أثناء قراءة الملف');
+        toast.dismiss();
+        toast.error('حدث خطأ أثناء معالجة الملف. تأكد من صيغة الملف الصحيحة.');
       }
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
     e.target.value = '';
+  };
+
+  const handleImportApartments = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const dataBuffer = event.target?.result;
+        const wb = XLSX.read(dataBuffer, { type: 'array' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws) as any[];
+
+        toast.loading('جاري استيراد الوحدات...');
+
+        let importedCount = 0;
+
+        for (const row of data) {
+          try {
+            const number = String(row['رقم الشقة'] || row['Number'] || '');
+            const buildingName = row['اسم المبنى'] || row['Building Name'] || '';
+            const buildingId = row['معرف المبنى'] || row['Building ID'] || 'b1';
+            const roomType = row['نوع الغرفة'] || row['Room Type'] || 'غرفة و صالة';
+            const status = 'vacant';
+
+            if (!number || !buildingName) continue;
+
+            const aptId = `${buildingId}-${number}`;
+            await setDoc(doc(db, 'apartments', aptId), {
+              buildingId,
+              buildingName,
+              number,
+              status,
+              roomType
+            });
+
+            importedCount++;
+          } catch (err) {
+            console.error('Error importing apartment:', row, err);
+          }
+        }
+
+        toast.dismiss();
+        toast.success(`تم استيراد ${importedCount} وحدة بنجاح`);
+      } catch (error) {
+        console.error(error);
+        toast.dismiss();
+        toast.error('حدث خطأ أثناء استيراد الوحدات');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  };
+
+  const downloadApartmentTemplate = () => {
+    const template = [
+      {
+        'رقم الشقة': '101',
+        'اسم المبنى': 'مبنى ١',
+        'معرف المبنى': 'b1',
+        'نوع الغرفة': 'غرفة و صالة'
+      },
+      {
+        'رقم الشقة': '102',
+        'اسم المبنى': 'مبنى ١',
+        'معرف المبنى': 'b1',
+        'نوع الغرفة': 'غرفتين و صالة'
+      }
+    ];
+    const ws = XLSX.utils.json_to_sheet(template);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Units Template");
+    XLSX.writeFile(wb, "apartments_template.xlsx");
   };
 
   const downloadTenantTemplate = () => {
@@ -3725,6 +4523,7 @@ function AppContent() {
             role: 'admin'
           } as any;
           setUser(mockUser);
+          localStorage.setItem('fyozr_user', JSON.stringify(mockUser));
           setLoading(false);
           toast.success('تم تسجيل الدخول بنجاح');
           return;
@@ -4419,7 +5218,11 @@ function AppContent() {
           </div>
           
           <nav className="flex-1 overflow-y-auto p-6 space-y-3 custom-scrollbar">
-            {NAV_ITEMS.map((item) => (
+          {NAV_ITEMS.map((item) => {
+            const isAlertTab = item.id === 'property-alerts';
+            const alertCount = isAlertTab ? getExpiringContracts(30).length : 0;
+            
+            return (
               <motion.button
                 key={item.id}
                 whileHover={{ x: -8, scale: 1.02 }}
@@ -4432,16 +5235,27 @@ function AppContent() {
                   }
                 }}
                 className={cn(
-                  "w-full flex items-center gap-4 px-5 py-4 rounded-[1.5rem] font-cairo font-bold text-sm transition-all duration-300",
+                  "w-full flex items-center justify-between px-5 py-4 rounded-[1.5rem] font-cairo font-bold text-sm transition-all duration-300",
                   activeTab === item.id
                     ? "bg-primary text-white shadow-xl shadow-primary/20 dark:shadow-none"
                     : "text-gray-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-primary dark:hover:text-primary hover:shadow-md"
                 )}
               >
-                <item.icon size={22} />
-                <span>{item.label}</span>
+                <div className="flex items-center gap-4">
+                  <item.icon size={22} />
+                  <span>{item.label}</span>
+                </div>
+                {alertCount > 0 && (
+                  <span className={cn(
+                    "w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black",
+                    activeTab === item.id ? "bg-white text-primary" : "bg-rose-500 text-white"
+                  )}>
+                    {alertCount}
+                  </span>
+                )}
               </motion.button>
-            ))}
+            );
+          })}
           </nav>
           
           <div className="p-6 border-t dark:border-slate-800">
@@ -4541,30 +5355,45 @@ function AppContent() {
               </div>
               
               <nav className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
-                {NAV_ITEMS.map((item) => (
-                  <motion.button
-                    key={item.id}
-                    whileHover={{ x: -5 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => {
-                      if (item.id === 'settings') {
-                        setIsBrandingModalOpen(true);
-                      } else {
-                        setActiveTab(item.id);
-                      }
-                      setIsSidebarOpen(false);
-                    }}
-                    className={cn(
-                      "w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl font-bold text-sm transition-all duration-200",
-                      activeTab === item.id
-                        ? "bg-primary text-white shadow-lg shadow-primary/20 dark:shadow-none"
-                        : "text-gray-500 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-slate-800 hover:text-primary dark:hover:text-primary"
-                    )}
-                  >
-                    <item.icon size={20} />
-                    <span>{item.label}</span>
-                  </motion.button>
-                ))}
+                {NAV_ITEMS.map((item) => {
+                  const isAlertTab = item.id === 'property-alerts';
+                  const alertCount = isAlertTab ? getExpiringContracts(30).length : 0;
+
+                  return (
+                    <motion.button
+                      key={item.id}
+                      whileHover={{ x: -5 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => {
+                        if (item.id === 'settings') {
+                          setIsBrandingModalOpen(true);
+                        } else {
+                          setActiveTab(item.id);
+                        }
+                        setIsSidebarOpen(false);
+                      }}
+                      className={cn(
+                        "w-full flex items-center justify-between px-4 py-3.5 rounded-2xl font-bold text-sm transition-all duration-200",
+                        activeTab === item.id
+                          ? "bg-primary text-white shadow-lg shadow-primary/20 dark:shadow-none"
+                          : "text-gray-500 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-slate-800 hover:text-primary dark:hover:text-primary"
+                      )}
+                    >
+                      <div className="flex items-center gap-3">
+                        <item.icon size={20} />
+                        <span>{item.label}</span>
+                      </div>
+                      {alertCount > 0 && (
+                        <span className={cn(
+                          "w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black",
+                          activeTab === item.id ? "bg-white text-primary" : "bg-rose-500 text-white"
+                        )}>
+                          {alertCount}
+                        </span>
+                      )}
+                    </motion.button>
+                  );
+                })}
               </nav>
               
               <div className="p-4 border-t dark:border-slate-800 space-y-3">
@@ -4723,6 +5552,32 @@ function AppContent() {
           )}
           {activeTab === 'dashboard' && (
             <div className="mb-10">
+              {getExpiringContracts(30).length > 0 && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mb-8 p-6 bg-rose-50 dark:bg-rose-900/10 border-2 border-rose-100 dark:border-rose-900/20 rounded-[2.5rem] flex flex-col md:flex-row items-center justify-between gap-6"
+                >
+                  <div className="flex items-center gap-5">
+                    <div className="w-14 h-14 bg-rose-500 rounded-2xl flex items-center justify-center shadow-lg shadow-rose-200 dark:shadow-none shrink-0">
+                      <Bell className="text-white" size={28} />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-black text-gray-900 dark:text-white">تنبيه: عقود قاربت على الانتهاء</h3>
+                      <p className="text-sm font-bold text-gray-500 dark:text-slate-400 mt-1">يوجد {getExpiringContracts(30).length} عقد سينتهي خلال الـ 30 يوماً القادمة.</p>
+                    </div>
+                  </div>
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setActiveTab('property-alerts')}
+                    className="px-8 py-3 bg-rose-500 text-white rounded-2xl font-black text-sm shadow-lg shadow-rose-200 hover:bg-rose-600 transition-all whitespace-nowrap"
+                  >
+                    عرض التفاصيل
+                  </motion.button>
+                </motion.div>
+              )}
+
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-primary rounded-2xl flex items-center justify-center shadow-lg shadow-primary/20 dark:shadow-none">
@@ -5822,24 +6677,26 @@ function AppContent() {
                           {req.status === 'completed' ? 'تم الإصلاح' : 'تحديد كمكتمل'}
                         </button>
                         
-                        <button
+                        <motion.button
+                          whileHover={{ scale: 1.1, translateY: -2 }}
                           onClick={() => {
                             setEditingRequest(req);
                             setIsModalOpen(true);
                           }}
-                          className="p-3 bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-400 rounded-2xl hover:bg-gray-200 dark:hover:bg-slate-700 transition-all"
+                          className="w-11 h-11 flex items-center justify-center rounded-[1.25rem] text-blue-600 border border-blue-50 bg-blue-50/40 hover:bg-blue-100 hover:border-blue-200 transition-all shadow-sm dark:bg-slate-800/50 dark:border-slate-700"
                         >
-                          <Pencil size={18} />
-                        </button>
+                          <Pencil size={18} strokeWidth={2.5} />
+                        </motion.button>
 
-                        <button
+                        <motion.button
+                          whileHover={{ scale: 1.1, translateY: -2 }}
                           onClick={() => {
                             setConfirmDeleteId(req.id);
                           }}
-                          className="p-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-2xl hover:bg-red-100 dark:hover:bg-red-900/30 transition-all"
+                          className="w-11 h-11 flex items-center justify-center rounded-[1.25rem] text-rose-600 border border-rose-50 bg-rose-50/40 hover:bg-rose-100 hover:border-rose-200 transition-all shadow-sm dark:bg-slate-800/50 dark:border-slate-700"
                         >
-                          <Trash2 size={18} />
-                        </button>
+                          <Trash2 size={18} strokeWidth={2.5} />
+                        </motion.button>
 
                         <button
                           onClick={() => {
@@ -6678,27 +7535,31 @@ function AppContent() {
                       )}
 
                       <div className="flex items-center gap-2">
-                        <button
+                        <motion.button
+                          whileHover={{ scale: 1.1, translateY: -2 }}
                           onClick={() => {
                             setEditingClubSub(sub);
                             setNewClubSub(sub);
                             setIsClubSubscriptionModalOpen(true);
                           }}
-                          className="p-3 bg-gray-100 dark:bg-slate-800 text-gray-400 hover:text-primary rounded-2xl transition-all"
+                          className="w-10 h-10 flex items-center justify-center rounded-[1.1rem] text-blue-600 border border-blue-50 bg-blue-50/40 hover:bg-blue-100 hover:border-blue-200 transition-all shadow-sm dark:bg-slate-800/50 dark:border-slate-700"
                           title="تعديل"
                         >
-                          <Pencil size={20} />
-                        </button>
-                        <button
+                          <Pencil size={16} strokeWidth={2.5} />
+                        </motion.button>
+                        <motion.button
+                          whileHover={{ scale: 1.1, translateY: -2 }}
                           onClick={() => updateClubSubPaymentStatus(sub.id, sub.paymentStatus === 'paid' ? 'unpaid' : 'paid')}
                           className={cn(
-                            "p-3 rounded-2xl transition-all",
-                            sub.paymentStatus === 'paid' ? "bg-blue-500 text-white shadow-lg shadow-blue-200 dark:shadow-none" : "bg-gray-100 dark:bg-slate-800 text-gray-400 hover:text-blue-500"
+                            "w-10 h-10 flex items-center justify-center rounded-[1.1rem] transition-all border",
+                            sub.paymentStatus === 'paid' 
+                              ? "bg-primary text-white border-primary shadow-lg shadow-primary/20" 
+                              : "bg-slate-50/40 text-slate-400 border-slate-100 hover:text-primary hover:bg-slate-50 hover:border-slate-200 dark:bg-slate-800/50 dark:border-slate-700"
                           )}
                           title={sub.paymentStatus === 'paid' ? "إلغاء التحصيل" : "تحصيل المبلغ"}
                         >
-                          <DollarSign size={20} />
-                        </button>
+                          <DollarSign size={16} strokeWidth={2.5} />
+                        </motion.button>
                         <button
                           onClick={() => updateClubSubStatus(sub.id, 'locked')}
                           className="flex-1 py-3 bg-rose-500 text-white rounded-2xl font-black text-xs shadow-lg shadow-rose-200 dark:shadow-none hover:bg-rose-600 transition-all flex items-center justify-center gap-2"
@@ -7075,14 +7936,43 @@ function AppContent() {
                     </div>
                   </div>
 
-                  {apartments.length === 0 && isAdmin && (
-                    <button 
-                      onClick={initializePropertyData}
-                      className="px-6 py-3 bg-primary text-white rounded-2xl font-black text-sm shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all"
+                  <div className="flex flex-wrap items-center gap-3">
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => downloadApartmentTemplate()}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300 rounded-xl font-bold text-sm hover:bg-gray-200 transition-all"
                     >
-                      تهيئة بيانات العقارات
-                    </button>
-                  )}
+                      <Download size={18} />
+                      نموذج الوحدات
+                    </motion.button>
+
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => aptFileInputRef.current?.click()}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-blue-50 text-blue-700 rounded-xl font-bold text-sm hover:bg-blue-100 transition-all"
+                    >
+                      <Upload size={18} />
+                      استيراد وحدات
+                    </motion.button>
+                    <input 
+                      type="file" 
+                      ref={aptFileInputRef} 
+                      onChange={handleImportApartments} 
+                      accept=".xlsx, .xls, .csv" 
+                      className="hidden" 
+                    />
+
+                    {apartments.length === 0 && isAdmin && (
+                      <button 
+                        onClick={initializePropertyData}
+                        className="px-6 py-3 bg-primary text-white rounded-2xl font-black text-sm shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all"
+                      >
+                        تهيئة بيانات العقارات
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
@@ -7126,19 +8016,49 @@ function AppContent() {
                           <div className="mt-8 grid grid-cols-4 gap-2">
                             {b.apartments.map(num => {
                               const apt = apartments.find(a => a.buildingId === b.id && a.number === num);
+                              const tenant = apt?.tenantId ? tenants.find(t => t.id === apt.tenantId) : null;
+                              
                               return (
-                                <div 
+                                <motion.div 
                                   key={num}
+                                  whileHover={{ scale: 1.1 }}
+                                  onClick={() => {
+                                    if (apt?.status === 'occupied' && tenant) {
+                                      setTenantSearch(tenant.name);
+                                      setActiveTab('tenants');
+                                    } else if (apt?.status === 'vacant') {
+                                      setEditingTenant(null);
+                                      setTenantForm({
+                                        name: '',
+                                        nationality: '',
+                                        phone: '',
+                                        company: '',
+                                        idNumber: '',
+                                        contractValue: 0,
+                                        paymentFrequency: 'monthly',
+                                        paymentMethod: 'cash',
+                                        buildingName: b.name,
+                                        apartmentId: apt.id,
+                                        aptNumber: num
+                                      } as any);
+                                      setIsTenantModalOpen(true);
+                                    }
+                                  }}
                                   className={cn(
-                                    "aspect-square rounded-xl flex items-center justify-center text-[10px] font-black border-2 transition-all cursor-pointer hover:scale-110",
-                                    apt?.status === 'occupied' ? "bg-primary/10 border-primary/30 text-primary" :
+                                    "aspect-square rounded-xl flex flex-col items-center justify-center border-2 transition-all cursor-pointer p-1 overflow-hidden",
+                                    apt?.status === 'occupied' ? "bg-primary text-white border-primary shadow-lg shadow-primary/20" :
                                     apt?.status === 'maintenance' ? "bg-rose-50 border-rose-200 text-rose-600" :
-                                    "bg-emerald-50 border-emerald-200 text-emerald-600"
+                                    "bg-white dark:bg-slate-800 border-gray-100 dark:border-slate-700 text-gray-400"
                                   )}
-                                  title={`شقة ${num} - ${apt?.status === 'occupied' ? 'مأهولة' : apt?.status === 'maintenance' ? 'صيانة' : 'شاغرة'}`}
+                                  title={`شقة ${num} - ${apt?.status === 'occupied' ? `مأهولة (${tenant?.name})` : apt?.status === 'maintenance' ? 'صيانة' : 'شاغرة'}`}
                                 >
-                                  {num}
-                                </div>
+                                  <span className="text-xs font-black">{num}</span>
+                                  {tenant && (
+                                    <span className="text-[7px] font-bold truncate w-full text-center mt-1 opacity-80">
+                                      {tenant.name.split(' ')[0]}
+                                    </span>
+                                  )}
+                                </motion.div>
                               );
                             })}
                           </div>
@@ -7156,195 +8076,395 @@ function AppContent() {
               {/* Statistics Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
                 {[
-                  { label: 'إجمالي الوحدات', value: apartments.length, icon: Home, color: 'primary' },
-                  { label: 'المؤجرة', value: tenants.length, icon: Users, color: 'emerald' },
+                  { label: 'إجمالي الوحدات', value: 137, icon: Home, color: 'slate' },
+                  { label: 'المؤجرة', value: tenants.length, icon: Users, color: 'blue' },
                   { label: 'الشاغرة', value: apartments.filter(a => a.status === 'vacant').length, icon: AlertCircle, color: 'amber' },
-                  { label: 'غرفة وصالة', value: apartments.filter(a => a.roomType === 'غرفة و صالة').length, icon: Layout, color: 'blue' },
-                  { label: 'غرفتين وصالة', value: apartments.filter(a => a.roomType === 'غرفتين و صالة').length, icon: LayoutDashboard, color: 'indigo' },
-                  { label: 'نسبة الإشغال', value: `${apartments.length > 0 ? Math.round((tenants.length / apartments.length) * 100) : 0}%`, icon: PieChart, color: 'rose' },
+                  { label: 'غرفة وصالة', value: apartments.filter(a => a.roomType === 'غرفة و صالة').length, icon: Layout, color: 'slate' },
+                  { label: 'غرفتين وصالة', value: apartments.filter(a => a.roomType === 'غرفتين و صالة').length, icon: LayoutDashboard, color: 'slate' },
+                  { label: 'نسبة الإشغال', value: `${Math.round((tenants.length / 137) * 100)}%`, icon: PieChart, color: 'blue' },
                 ].map((stat, i) => (
                   <motion.div
                     key={i}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: i * 0.05 }}
-                    className="bg-white dark:bg-slate-900 p-5 rounded-[2rem] border border-gray-100 dark:border-slate-800 shadow-sm flex items-center gap-4"
+                    className="bg-white dark:bg-slate-900 p-5 rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm flex items-center gap-4 hover:shadow-md transition-all cursor-pointer group"
                   >
                     <div className={cn(
-                      "w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg dark:shadow-none shrink-0",
-                      stat.color === 'primary' ? "bg-primary text-white shadow-primary/20" :
-                      stat.color === 'emerald' ? "bg-emerald-500 text-white shadow-emerald-200" :
-                      stat.color === 'amber' ? "bg-amber-500 text-white shadow-amber-200" :
-                      stat.color === 'blue' ? "bg-blue-500 text-white shadow-blue-200" :
-                      stat.color === 'indigo' ? "bg-indigo-500 text-white shadow-indigo-200" :
-                      "bg-rose-500 text-white shadow-rose-200"
+                      "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-105",
+                      stat.color === 'slate' ? "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400" :
+                      stat.color === 'blue' ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400" :
+                      stat.color === 'amber' ? "bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400" :
+                      "bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-400"
                     )}>
-                      <stat.icon size={24} />
+                      <stat.icon size={22} />
                     </div>
                     <div>
-                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-tight leading-none mb-1">{stat.label}</p>
-                      <h3 className="text-lg font-black text-gray-900 dark:text-white leading-none">{stat.value}</h3>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-tight leading-none mb-1">{stat.label}</p>
+                      <h3 className="text-lg font-black text-slate-900 dark:text-white leading-none">{stat.value}</h3>
                     </div>
                   </motion.div>
                 ))}
               </div>
 
               <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-8 border border-gray-100 dark:border-slate-800 shadow-sm">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
-                  <div className="flex items-center gap-5">
-                    <div className="w-14 h-14 bg-primary rounded-2xl flex items-center justify-center shadow-lg shadow-primary/20 dark:shadow-none">
-                      <Users className="text-white" size={28} />
-                    </div>
-                    <div>
-                      <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">
-                        إدارة المستأجرين
-                      </h2>
-                      <p className="text-gray-500 dark:text-slate-400 font-bold mt-1">قائمة بجميع المستأجرين الحاليين وتفاصيل عقودهم</p>
-                    </div>
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+                <div className="flex items-center gap-5">
+                  <div className="w-16 h-16 bg-primary rounded-[1.5rem] flex items-center justify-center shadow-xl shadow-primary/20 dark:shadow-none">
+                    <Users className="text-white" size={32} />
+                  </div>
+                  <div>
+                    <h2 className="text-4xl font-black text-gray-900 dark:text-white tracking-tight">إدارة العقود</h2>
+                    <p className="text-gray-500 dark:text-slate-400 font-bold mt-1">قائمة بجميع العقود الحالية وتفاصيل المستأجرين</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-4">
+                  <div className="flex bg-gray-200 dark:bg-slate-800 p-1.5 rounded-[1.5rem] font-cairo">
+                    <button 
+                      onClick={() => setTenantFilter('active')}
+                      className={cn(
+                        "px-8 py-3 rounded-2xl font-black text-xs transition-all",
+                        tenantFilter === 'active' ? "bg-white dark:bg-slate-700 text-primary shadow-lg shadow-gray-200/50" : "text-gray-500 hover:text-gray-700"
+                      )}
+                    >
+                      العقود النشطة
+                    </button>
+                    <button 
+                      onClick={() => setTenantFilter('archived')}
+                      className={cn(
+                        "px-8 py-3 rounded-2xl font-black text-xs transition-all",
+                        tenantFilter === 'archived' ? "bg-white dark:bg-slate-700 text-rose-500 shadow-lg shadow-gray-200/50" : "text-gray-500 hover:text-gray-700"
+                      )}
+                    >
+                      الأرشيف
+                    </button>
+                  </div>
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => {
+                      setEditingTenant(null);
+                      setTenantForm({
+                        name: '',
+                        nationality: '',
+                        phone: '',
+                        company: '',
+                        idNumber: '',
+                        contractValue: 0,
+                        collectedAmount: 0,
+                        paymentFrequency: 'monthly',
+                        paymentMethod: 'cash',
+                        status: 'active'
+                      } as any);
+                      setIsTenantModalOpen(true);
+                    }}
+                    className="flex items-center gap-3 px-8 py-4 bg-primary text-white rounded-[2rem] font-black text-sm shadow-xl shadow-primary/20 hover:bg-primary/90 transition-all font-cairo"
+                  >
+                    <Plus size={20} />
+                    <span>إضافة عقد جديد</span>
+                  </motion.button>
+                </div>
+              </div>
+
+                <div className="p-8 border-b dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-6 bg-gray-50/50 dark:bg-slate-900/50 rounded-t-[2.5rem]">
+                  <div className="relative flex-1 max-w-xl">
+                    <Search className="absolute right-5 top-1/2 -translate-y-1/2 text-gray-400" size={22} />
+                    <input 
+                      type="text"
+                      placeholder="البحث باسم المستأجر، رقم الشفة أو الجوال..."
+                      value={tenantSearch}
+                      onChange={(e) => setTenantSearch(e.target.value)}
+                      className="w-full pr-14 pl-6 py-4 bg-white dark:bg-slate-800 border-none rounded-2xl text-base font-bold text-gray-900 dark:text-white focus:ring-4 focus:ring-primary/10 transition-all shadow-sm font-cairo"
+                    />
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-3">
-                    <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => downloadTenantTemplate()}
-                      className="flex items-center gap-2 px-4 py-2.5 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300 rounded-xl font-bold text-sm hover:bg-gray-200 transition-all"
+                  <div className="flex items-center gap-4">
+                    <select
+                      value={tenantBuildingFilter}
+                      onChange={(e) => setTenantBuildingFilter(e.target.value)}
+                      className="px-6 py-4 bg-white dark:bg-slate-800 border-none rounded-2xl text-sm font-bold text-gray-700 dark:text-white focus:ring-4 focus:ring-primary/10 transition-all shadow-sm font-cairo outline-none"
                     >
-                      <Download size={18} />
-                      نموذج الاستيراد
-                    </motion.button>
+                      <option value="all">كل المباني</option>
+                      {PROPERTY_BUILDINGS.map(b => (
+                        <option key={b.id} value={b.id}>{b.name}</option>
+                      ))}
+                    </select>
 
                     <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
+                      whileHover={{ scale: 1.05 }}
                       onClick={() => fileInputRef.current?.click()}
-                      className="flex items-center gap-2 px-4 py-2.5 bg-emerald-50 text-emerald-700 rounded-xl font-bold text-sm hover:bg-emerald-100 transition-all"
+                      className="flex items-center gap-3 px-6 py-3.5 bg-emerald-50 dark:bg-emerald-900/10 text-emerald-600 rounded-2xl font-black text-sm border-2 border-emerald-100 dark:border-emerald-900/20 hover:bg-emerald-100 transition-all font-cairo"
                     >
-                      <Upload size={18} />
-                      استيراد مستأجرين
-                    </motion.button>
-                    <input 
-                      type="file" 
-                      ref={fileInputRef} 
-                      onChange={handleImportTenants} 
-                      accept=".xlsx, .xls, .csv" 
-                      className="hidden" 
-                    />
-
-                    <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => setIsFinancialDashboardOpen(true)}
-                      className="flex items-center gap-3 px-6 py-3 bg-blue-600 text-white rounded-2xl font-black text-sm shadow-xl shadow-blue-200 dark:shadow-none hover:bg-blue-700 transition-all"
-                    >
-                      <DollarSign size={20} />
-                      لوحة المبالغ المالية
-                    </motion.button>
-                    
-                    <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => {
-                        setEditingTenant(null);
-                        setTenantForm({
-                          name: '',
-                          nationality: '',
-                          phone: '',
-                          company: '',
-                          idNumber: '',
-                          contractValue: 0,
-                          paymentFrequency: 'monthly',
-                          paymentMethod: 'cash'
-                        });
-                        setIsTenantModalOpen(true);
-                      }}
-                      className="flex items-center gap-3 px-6 py-3 bg-primary text-white rounded-2xl font-black text-sm shadow-xl shadow-primary/20 dark:shadow-none hover:bg-primary/90 transition-all"
-                    >
-                      <Plus size={20} />
-                      إضافة مستأجر جديد
+                      <Upload size={20} />
+                      استيراد
                     </motion.button>
                   </div>
                 </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-right border-separate border-spacing-y-3">
+                <div className="overflow-x-auto custom-scrollbar">
+                  <table className="w-full text-right border-collapse">
                     <thead>
-                      <tr className="text-gray-400 text-[10px] font-black uppercase tracking-widest">
-                        <th className="px-4 py-4">المستأجر</th>
-                        <th className="px-4 py-4">الهوية</th>
-                        <th className="px-4 py-4">الوحدة</th>
-                        <th className="px-4 py-4">النوع</th>
-                        <th className="px-4 py-4">الشركة</th>
-                        <th className="px-4 py-4">بداية العقد</th>
-                        <th className="px-4 py-4">نهاية العقد</th>
-                        <th className="px-4 py-4">القيمة السنوية</th>
-                        <th className="px-4 py-4">الحالة</th>
-                        <th className="px-4 py-4">الإجراءات</th>
+                      <tr className="bg-gray-50/50 dark:bg-slate-800/30">
+                        <th 
+                          onClick={() => {
+                            if (tenantSortField === 'name') setTenantSortDirection(tenantSortDirection === 'asc' ? 'desc' : 'asc');
+                            else { setTenantSortField('name'); setTenantSortDirection('asc'); }
+                          }}
+                          className="px-8 py-6 text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] font-cairo cursor-pointer hover:text-primary transition-colors text-right"
+                        >
+                          <div className="flex items-center gap-2">
+                             المستأجر
+                             {tenantSortField === 'name' && (tenantSortDirection === 'asc' ? <ChevronRight size={14} className="-rotate-90" /> : <ChevronRight size={14} className="rotate-90" />)}
+                          </div>
+                        </th>
+                        <th 
+                          onClick={() => {
+                            if (tenantSortField === 'aptNumber') setTenantSortDirection(tenantSortDirection === 'asc' ? 'desc' : 'asc');
+                            else { setTenantSortField('aptNumber'); setTenantSortDirection('asc'); }
+                          }}
+                          className="px-6 py-6 text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] font-cairo cursor-pointer hover:text-primary transition-colors text-right"
+                        >
+                          <div className="flex items-center gap-2">
+                             الوحدة
+                             {tenantSortField === 'aptNumber' && (tenantSortDirection === 'asc' ? <ChevronRight size={14} className="-rotate-90" /> : <ChevronRight size={14} className="rotate-90" />)}
+                          </div>
+                        </th>
+                        <th 
+                          onClick={() => {
+                            if (tenantSortField === 'contractValue') setTenantSortDirection(tenantSortDirection === 'asc' ? 'desc' : 'asc');
+                            else { setTenantSortField('contractValue'); setTenantSortDirection('asc'); }
+                          }}
+                          className="px-6 py-6 text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] font-cairo cursor-pointer hover:text-primary transition-colors text-right"
+                        >
+                          <div className="flex items-center gap-2">
+                             الوضع المالي
+                             {tenantSortField === 'contractValue' && (tenantSortDirection === 'asc' ? <ChevronRight size={14} className="-rotate-90" /> : <ChevronRight size={14} className="rotate-90" />)}
+                          </div>
+                        </th>
+                        <th 
+                          onClick={() => {
+                            if (tenantSortField === 'startDate') setTenantSortDirection(tenantSortDirection === 'asc' ? 'desc' : 'asc');
+                            else { setTenantSortField('startDate'); setTenantSortDirection('asc'); }
+                          }}
+                          className="px-6 py-6 text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] font-cairo cursor-pointer hover:text-primary transition-colors text-right"
+                        >
+                          <div className="flex items-center gap-2">
+                             تاريخ العقد
+                             {tenantSortField === 'startDate' && (tenantSortDirection === 'asc' ? <ChevronRight size={14} className="-rotate-90" /> : <ChevronRight size={14} className="rotate-90" />)}
+                          </div>
+                        </th>
+                        <th className="px-6 py-6 text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] font-cairo text-right">الحالة</th>
+                        <th className="px-8 py-6 text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] text-center font-cairo">الإجراءات</th>
                       </tr>
                     </thead>
-                    <tbody>
-                      {tenants.map((tenant) => {
+                    <tbody className="divide-y dark:divide-slate-800">
+                      {tenants
+                        .filter(t => (t.status || 'active') === tenantFilter)
+                        .filter(t => {
+                          if (tenantBuildingFilter === 'all') return true;
+                          const apt = apartments.find(a => a.id === t.apartmentId);
+                          return apt?.buildingId === tenantBuildingFilter;
+                        })
+                        .filter(t => {
+                          if (!tenantSearch) return true;
+                          const search = tenantSearch.toLowerCase();
+                          const apt = apartments.find(a => a.id === t.apartmentId);
+                          return t.name.toLowerCase().includes(search) || 
+                                 t.phone.includes(search) || 
+                                 t.idNumber.includes(search) ||
+                                 apt?.number.toString().includes(search);
+                        })
+                        .sort((a, b) => {
+                          let valA: any = a[tenantSortField as keyof Tenant];
+                          let valB: any = b[tenantSortField as keyof Tenant];
+
+                          if (tenantSortField === 'aptNumber') {
+                            const aptA = apartments.find(apt => apt.id === a.apartmentId);
+                            const aptB = apartments.find(apt => apt.id === b.apartmentId);
+                            valA = aptA?.number || 0;
+                            valB = aptB?.number || 0;
+                          }
+
+                          if (valA < valB) return tenantSortDirection === 'asc' ? -1 : 1;
+                          if (valA > valB) return tenantSortDirection === 'asc' ? 1 : -1;
+                          return 0;
+                        })
+                        .map((tenant) => {
                         const apt = apartments.find(a => a.id === tenant.apartmentId);
                         const building = PROPERTY_BUILDINGS.find(b => b.id === apt?.buildingId);
                         const daysLeft = differenceInDays(safeToDate(tenant.endDate), new Date());
-                        const statusColor = daysLeft < 0 ? "text-rose-600 bg-rose-50" : daysLeft <= 30 ? "text-amber-600 bg-amber-50" : "text-emerald-600 bg-emerald-50";
+                        const collected = tenant.collectedAmount || 0;
+                        const value = tenant.contractValue || 1;
+                        const progress = Math.min(100, Math.max(0, (collected / value) * 100));
+                        const statusColor = daysLeft < 0 ? "bg-rose-50 text-rose-600" : daysLeft <= 30 ? "bg-amber-50 text-amber-600" : "bg-emerald-50 text-emerald-600";
 
                         return (
                           <motion.tr 
                             key={tenant.id}
-                            initial={{ opacity: 0, x: 20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            className="bg-gray-50 dark:bg-slate-800/50 hover:bg-gray-100 dark:hover:bg-slate-800 transition-all group"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            className="group hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition-all font-cairo"
                           >
-                            <td className="px-4 py-5 rounded-r-3xl">
-                              <div className="font-black text-gray-900 dark:text-white text-sm">{tenant.name}</div>
-                              <div className="text-[10px] font-bold text-gray-400">{tenant.nationality} • {tenant.phone}</div>
+                            <td className="px-8 py-8">
+                              <div className="flex items-center gap-5">
+                                <div className="w-14 h-14 bg-primary/10 rounded-2xl flex items-center justify-center text-primary font-black text-xl group-hover:scale-110 transition-transform">
+                                  {tenant.name.charAt(0)}
+                                </div>
+                                <div>
+                                  <div className="font-black text-gray-900 dark:text-white text-lg leading-tight group-hover:text-primary transition-colors">{tenant.name}</div>
+                                  <div className="text-[11px] font-bold text-gray-400 mt-1.5 flex items-center gap-3">
+                                    <span className="flex items-center gap-1"><Phone size={12} className="opacity-70" /> {tenant.phone}</span>
+                                    <span className="opacity-30">•</span>
+                                    <span className="flex items-center gap-1"><IdCard size={12} className="opacity-70" /> {tenant.idNumber}</span>
+                                  </div>
+                                </div>
+                              </div>
                             </td>
-                            <td className="px-4 py-5 text-xs font-bold text-gray-600 dark:text-slate-400">
-                              {tenant.idNumber || '—'}
+                            <td className="px-6 py-8">
+                              <div className="flex flex-col gap-1.5">
+                                <div className="text-sm font-black text-gray-900 dark:text-white">شقة {apt?.number}</div>
+                                <div className="text-[10px] font-black text-primary bg-primary/5 px-2.5 py-1 rounded-lg w-fit border border-primary/10 tracking-widest">{building?.name || 'مبنى'}</div>
+                              </div>
                             </td>
-                            <td className="px-4 py-5">
-                              <div className="font-bold text-gray-700 dark:text-slate-300 text-xs">{building?.name || 'غير معروف'}</div>
-                              <div className="text-[10px] font-black text-primary">شقة {apt?.number || '??'}</div>
+                            <td className="px-6 py-8">
+                              <div className="w-56 space-y-3">
+                                <div className="flex justify-between items-end">
+                                  <div className="flex flex-col">
+                                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5 leading-none">التحصيل {progress.toFixed(0)}%</span>
+                                    <span className="text-xs font-black text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 rounded-md border border-emerald-100 dark:border-emerald-800">
+                                      {tenant.collectedAmount?.toLocaleString()} ر.س
+                                    </span>
+                                  </div>
+                                  <div className="flex flex-col items-end">
+                                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5 leading-none">التكلفة</span>
+                                    <span className="text-xs font-black text-gray-600 dark:text-gray-400">
+                                      {tenant.contractValue?.toLocaleString()} ر.س
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="h-2 bg-gray-100 dark:bg-slate-800 rounded-full overflow-hidden shadow-inner">
+                                  <motion.div 
+                                    initial={{ width: 0 }}
+                                    animate={{ width: `${progress}%` }}
+                                    className={cn(
+                                      "h-full rounded-full transition-all duration-1000 relative",
+                                      progress > 90 ? "bg-emerald-500" : progress > 50 ? "bg-primary" : "bg-amber-500"
+                                    )}
+                                  >
+                                    <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent" />
+                                  </motion.div>
+                                </div>
+                              </div>
                             </td>
-                            <td className="px-4 py-5 text-[10px] font-bold text-gray-500">
-                              {apt?.roomType || '—'}
+                            <td className="px-6 py-8">
+                              <div className="space-y-1.5">
+                                <div className="flex items-center gap-2 text-[11px] font-bold text-gray-500 bg-gray-50 dark:bg-slate-800 px-2.5 py-1.5 rounded-xl border border-gray-100 dark:border-slate-700 w-fit">
+                                  <Calendar size={12} className="opacity-50" />
+                                  <span>{format(safeToDate(tenant.startDate), 'yyyy/MM/dd')}</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-[11px] font-bold text-rose-500 bg-rose-50 dark:bg-rose-900/10 px-2.5 py-1.5 rounded-xl border border-rose-100 dark:border-rose-900/20 w-fit">
+                                  <Calendar size={12} className="opacity-50" />
+                                  <span>{format(safeToDate(tenant.endDate), 'yyyy/MM/dd')}</span>
+                                </div>
+                              </div>
                             </td>
-                            <td className="px-4 py-5 font-bold text-gray-600 dark:text-slate-400 text-xs">
-                              {tenant.company}
-                            </td>
-                            <td className="px-4 py-5 text-[10px] font-bold text-gray-500">
-                              {format(safeToDate(tenant.startDate), 'yyyy/MM/dd')}
-                            </td>
-                            <td className="px-4 py-5 text-[10px] font-bold text-gray-500">
-                              {format(safeToDate(tenant.endDate), 'yyyy/MM/dd')}
-                            </td>
-                            <td className="px-4 py-5 font-black text-primary text-sm">
-                              {tenant.contractValue?.toLocaleString()} ر.س
-                            </td>
-                            <td className="px-4 py-5">
-                              <span className={cn("px-3 py-1.5 rounded-xl text-[9px] font-black whitespace-nowrap", statusColor)}>
+                            <td className="px-6 py-8">
+                              <span className={cn("px-4 py-2.5 rounded-2xl text-[10px] font-black border tracking-widest uppercase flex items-center gap-2 w-fit", statusColor)}>
+                                <div className={cn("w-1.5 h-1.5 rounded-full animate-pulse", daysLeft < 0 ? "bg-rose-500" : daysLeft <= 30 ? "bg-amber-500" : "bg-emerald-500")} />
                                 {daysLeft < 0 ? 'منتهي' : `${daysLeft} يوم متبقي`}
                               </span>
                             </td>
-                            <td className="px-4 py-5 rounded-l-3xl">
-                              <div className="flex items-center gap-2">
-                                <button
+                            <td className="px-8 py-8">
+                              <div className="flex items-center justify-center gap-3">
+                                <motion.button
+                                  whileHover={{ scale: 1.1, translateY: -2 }}
                                   onClick={() => {
                                     setEditingTenant(tenant);
                                     setTenantForm(tenant);
                                     setIsTenantModalOpen(true);
                                   }}
-                                  className="p-2 bg-white dark:bg-slate-800 text-gray-400 hover:text-primary rounded-xl transition-all border border-gray-100 dark:border-slate-700"
+                                  className="w-11 h-11 flex items-center justify-center rounded-[1.25rem] text-blue-600 border border-blue-50 bg-blue-50/40 hover:bg-blue-100 hover:border-blue-200 transition-all shadow-sm dark:bg-slate-800/50 dark:border-slate-700"
+                                  title="تعديل"
                                 >
-                                  <Pencil size={16} />
-                                </button>
-                                <button
-                                  onClick={() => deleteTenant(tenant.id)}
-                                  className="p-2 bg-white dark:bg-slate-800 text-gray-400 hover:text-rose-500 rounded-xl transition-all border border-gray-100 dark:border-slate-700"
+                                  <Pencil size={18} strokeWidth={2.5} />
+                                </motion.button>
+
+                                <motion.button
+                                  whileHover={{ scale: 1.1, translateY: -2 }}
+                                  onClick={() => {
+                                    setMovingTenant(tenant);
+                                    setIsMoveModalOpen(true);
+                                  }}
+                                  className="w-11 h-11 flex items-center justify-center rounded-[1.25rem] text-purple-600 border border-purple-50 bg-purple-50/40 hover:bg-purple-100 hover:border-purple-200 transition-all shadow-sm dark:bg-slate-800/50 dark:border-slate-700"
+                                  title="نقل إلى شقة أخرى"
                                 >
-                                  <Trash2 size={16} />
-                                </button>
+                                  <ArrowRightLeft size={18} strokeWidth={2.5} />
+                                </motion.button>
+
+                                <motion.button
+                                  whileHover={{ scale: 1.1, translateY: -2 }}
+                                  onClick={() => {
+                                    setSelectedTenantForPayments(tenant);
+                                    setIsPaymentModalOpen(true);
+                                  }}
+                                  className="w-11 h-11 flex items-center justify-center rounded-[1.25rem] text-slate-600 border border-slate-100 bg-slate-50/40 hover:bg-slate-100 hover:border-slate-200 transition-all shadow-sm dark:bg-slate-800/50 dark:border-slate-700"
+                                  title="سجل المدفوعات"
+                                >
+                                  <DollarSign size={18} strokeWidth={2.5} />
+                                </motion.button>
+                                
+                                {tenant.status !== 'archived' && (
+                                  <motion.button
+                                    whileHover={{ scale: 1.1, translateY: -2 }}
+                                    onClick={async () => {
+                                      if (confirm('هل أنت متأكد من أرشفة هذا العقد؟ سيتم إخلاء الشقة تلقائياً.')) {
+                                        try {
+                                          await updateDoc(doc(db, 'tenants', tenant.id), { status: 'archived' });
+                                          if (tenant.apartmentId) {
+                                            await updateDoc(doc(db, 'apartments', tenant.apartmentId), { 
+                                              status: 'vacant',
+                                              tenantId: deleteField()
+                                            });
+                                          }
+                                          toast.success('تمت أرشفة العقد بنجاح');
+                                        } catch (error) {
+                                          console.error(error);
+                                          toast.error('حدث خطأ أثناء الأرشفة');
+                                        }
+                                      }
+                                    }}
+                                    className="w-11 h-11 flex items-center justify-center rounded-[1.25rem] text-amber-600 border border-amber-50 bg-amber-50/40 hover:bg-amber-100 hover:border-amber-200 transition-all shadow-sm dark:bg-slate-800/50 dark:border-slate-700"
+                                    title="أرشفة"
+                                  >
+                                    <Archive size={18} strokeWidth={2.5} />
+                                  </motion.button>
+                                )}
+
+                                <motion.button
+                                  whileHover={{ scale: 1.1, translateY: -2 }}
+                                  onClick={async () => {
+                                    if (confirm('هل أنت متأكد من حذف هذا المستأجر نهائياً؟')) {
+                                      try {
+                                        await deleteDoc(doc(db, 'tenants', tenant.id));
+                                        if (tenant.apartmentId) {
+                                          await updateDoc(doc(db, 'apartments', tenant.apartmentId), { 
+                                            status: 'vacant', 
+                                            tenantId: deleteField()
+                                          });
+                                        }
+                                        toast.success('تم حذف البيانات بنجاح');
+                                      } catch (error) {
+                                        console.error(error);
+                                        toast.error('حدث خطأ أثناء الحذف');
+                                      }
+                                    }
+                                  }}
+                                  className="w-11 h-11 flex items-center justify-center rounded-[1.25rem] text-rose-600 border border-rose-50 bg-rose-50/40 hover:bg-rose-100 hover:border-rose-200 transition-all shadow-sm dark:bg-slate-800/50 dark:border-slate-700"
+                                  title="حذف"
+                                >
+                                  <Trash2 size={18} strokeWidth={2.5} />
+                                </motion.button>
                               </div>
                             </td>
                           </motion.tr>
@@ -7352,10 +8472,10 @@ function AppContent() {
                       })}
                     </tbody>
                   </table>
-                  {tenants.length === 0 && (
-                    <div className="py-20 text-center opacity-20">
-                      <Users size={48} className="mx-auto mb-3" />
-                      <p className="text-sm font-black">لا يوجد مستأجرون مسجلون حالياً</p>
+                  {tenants.filter(t => (t.status || 'active') === tenantFilter).length === 0 && (
+                    <div className="py-20 text-center opacity-20 font-cairo">
+                      <Archive size={48} className="mx-auto mb-3" />
+                      <p className="text-sm font-black">لا توجد عقود مسجلة هنا</p>
                     </div>
                   )}
                 </div>
@@ -8332,6 +9452,31 @@ function AppContent() {
         apartments={apartments}
       />
 
+      <RentPaymentsModal 
+        isOpen={isPaymentModalOpen}
+        onClose={() => {
+          setIsPaymentModalOpen(false);
+          setSelectedTenantForPayments(null);
+        }}
+        tenant={selectedTenantForPayments}
+        payments={tenantPayments}
+        onAddPayment={addRentPayment}
+        onUpdateStatus={updateRentPaymentStatus}
+        onDeletePayment={deleteRentPayment}
+        onGenerateSchedule={generatePaymentSchedule}
+      />
+
+      <MoveTenantModal 
+        isOpen={isMoveModalOpen}
+        onClose={() => {
+          setIsMoveModalOpen(false);
+          setMovingTenant(null);
+        }}
+        tenant={movingTenant}
+        apartments={apartments}
+        onMove={moveTenantToApartment}
+      />
+
       {/* History Modal */}
       <AnimatePresence>
         {selectedHistoryGroup && (
@@ -8414,31 +9559,31 @@ function AppContent() {
 
                       <div className="flex items-center gap-2">
                         <motion.button 
-                          whileHover={{ scale: 1.1 }}
+                          whileHover={{ scale: 1.1, translateY: -2 }}
                           whileTap={{ scale: 0.9 }}
                           onClick={() => {
                             setEditingRequest(req);
                             setIsModalOpen(true);
                           }}
-                          className="p-2 hover:bg-white dark:hover:bg-slate-800 rounded-xl text-gray-400 hover:text-primary transition-all"
+                          className="w-10 h-10 flex items-center justify-center rounded-[1.1rem] text-blue-600 border border-blue-50 bg-blue-50/40 hover:bg-blue-100 hover:border-blue-200 transition-all shadow-sm dark:bg-slate-800/50 dark:border-slate-700"
                         >
-                          <Pencil size={20} />
+                          <Pencil size={18} strokeWidth={2.5} />
                         </motion.button>
                         <motion.button 
-                          whileHover={{ scale: 1.1 }}
+                          whileHover={{ scale: 1.1, translateY: -2 }}
                           whileTap={{ scale: 0.9 }}
                           onClick={() => setSelectedRequest(req)}
-                          className="p-2 hover:bg-white dark:hover:bg-slate-800 rounded-xl text-gray-400 hover:text-primary transition-all"
+                          className="w-10 h-10 flex items-center justify-center rounded-[1.1rem] text-slate-600 border border-slate-50 bg-slate-50/40 hover:bg-slate-100 hover:border-slate-200 transition-all shadow-sm dark:bg-slate-800/50 dark:border-slate-700"
                         >
-                          <Printer size={20} />
+                          <Printer size={18} strokeWidth={2.5} />
                         </motion.button>
                         <motion.button 
-                          whileHover={{ scale: 1.1, color: "#ef4444" }}
+                          whileHover={{ scale: 1.1, translateY: -2 }}
                           whileTap={{ scale: 0.9 }}
                           onClick={() => setConfirmDeleteId(req.id)}
-                          className="p-2 hover:bg-white dark:hover:bg-slate-800 rounded-xl text-gray-400 transition-all"
+                          className="w-10 h-10 flex items-center justify-center rounded-[1.1rem] text-rose-600 border border-rose-50 bg-rose-50/40 hover:bg-rose-100 hover:border-rose-200 transition-all shadow-sm dark:bg-slate-800/50 dark:border-slate-700"
                         >
-                          <Trash2 size={20} />
+                          <Trash2 size={18} strokeWidth={2.5} />
                         </motion.button>
                       </div>
                     </div>
