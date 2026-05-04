@@ -34,7 +34,8 @@ import {
   limit,
   getDocFromServer,
   getDoc,
-  getDocs
+  getDocs,
+  serverTimestamp
 } from 'firebase/firestore';
 import { 
   Building2, 
@@ -94,7 +95,11 @@ import {
   Users,
   Ban,
   Bell,
-  ArrowRightLeft
+  ArrowRightLeft,
+  MicOff,
+  UserCheck,
+  Sparkles,
+  Home as HomeIcon
 } from 'lucide-react';
 import { 
   format, 
@@ -247,11 +252,11 @@ const BUILDINGS = [
 ];
 
 const PROPERTY_BUILDINGS = [
-  { id: 'b1', name: 'مبنى ١', apartments: Array.from({length: 34}, (_, i) => (i + 1).toString()) },
-  { id: 'b2', name: 'مبنى ٢', apartments: Array.from({length: 30}, (_, i) => (i + 35).toString()) },
-  { id: 'b3', name: 'مبنى ٣', apartments: Array.from({length: 16}, (_, i) => (i + 65).toString()) },
-  { id: 'b4', name: 'مبنى ٤', apartments: Array.from({length: 30}, (_, i) => (i + 81).toString()) },
-  { id: 'b5', name: 'مبنى ٥', apartments: Array.from({length: 27}, (_, i) => (i + 111).toString()) }
+  { id: 'b1', name: 'مبنى ١', apartments: ['102', '103', '105', '106', '107', '108', '109', '110', '112', '113', '114', '115', '116', '117', '118', '119', '120', '121', '122', '123', '124', '125', '126', '127', '128', '129', '131', '132', '133', '134', '135'] },
+  { id: 'b2', name: 'مبنى ٢', apartments: ['202', '203', '206', '207', '208', '211', '213', '214', '215', '217', '218', '219', '221', '222', '224', '225', '226', '227', '231', '232', '233'] },
+  { id: 'b3', name: 'مبنى ٣', apartments: ['312', '313', '314', '315', '316', '317', '318', '321', '322', '324', '325', '326', '327'] },
+  { id: 'b4', name: 'مبنى ٤', apartments: ['401', '402', '403', '404', '405', '406', '407', '409', '410', '411', '412', '414', '415', '416', '417', '418', '419', '421', '422', '423', '424', '425', '426', '427', '431', '432', '433'] },
+  { id: 'b5', name: 'مبنى ٥', apartments: ['501', '502', '503', '504', '505', '506', '507', '509', '510', '511', '512', '513', '514', '515', '516', '517', '518', '519', '521', '522', '523', '524', '525', '526', '527'] }
 ];
 
 const SERVICES = [
@@ -2434,7 +2439,15 @@ const TenantModal = ({ isOpen, onClose, onSave, initialData, apartments }: any) 
                 disabled={!!initialData}
                 className="w-full p-4 bg-gray-50 dark:bg-slate-800 border-none rounded-2xl focus:ring-2 focus:ring-primary text-sm font-bold transition-all appearance-none"
                 value={formData.apartmentId}
-                onChange={e => setFormData({...formData, apartmentId: e.target.value})}
+                onChange={e => {
+                  const selectedApt = apartments.find((a: any) => a.id === e.target.value);
+                  setFormData({
+                    ...formData, 
+                    apartmentId: e.target.value,
+                    aptNumber: selectedApt?.number || '',
+                    buildingName: selectedApt?.buildingName || ''
+                  });
+                }}
               >
                 <option value="">اختر الشقة...</option>
                 {apartments.filter((a: any) => a.status === 'vacant' || a.id === initialData?.apartmentId).map((a: any) => (
@@ -3181,6 +3194,94 @@ function AppContent() {
     const params = new URLSearchParams(window.location.search);
     return params.get('tab') || 'dashboard';
   });
+  const [aptSearch, setAptSearch] = useState('');
+  const [aptStatusFilter, setAptStatusFilter] = useState<'all' | 'vacant' | 'occupied'>('all');
+  const [aptBuildingFilter, setAptBuildingFilter] = useState<string>('all');
+  const [selectedAptIds, setSelectedAptIds] = useState<string[]>([]);
+
+  const deleteSelectedApartments = async () => {
+    if (selectedAptIds.length === 0) return;
+    
+    toast(`هل أنت متأكد من حذف ${selectedAptIds.length} وحدات مختارة؟`, {
+      description: 'سيتم حذف كافة الوحدات المحددة نهائياً.',
+      action: {
+        label: 'تأكيد حذف المحدد',
+        onClick: async () => {
+          const loadingToast = toast.loading(`جاري حذف ${selectedAptIds.length} وحدات...`);
+          try {
+            const batchSize = 10;
+            for (let i = 0; i < selectedAptIds.length; i += batchSize) {
+              const chunk = selectedAptIds.slice(i, i + batchSize);
+              await Promise.all(chunk.map(id => deleteDoc(doc(db, 'apartments', id))));
+            }
+            setSelectedAptIds([]);
+            toast.dismiss(loadingToast);
+            toast.success('تم حذف الوحدات المختارة بنجاح');
+          } catch (error) {
+            toast.dismiss(loadingToast);
+            toast.error('حدث خطأ أثناء الحذف');
+            console.error(error);
+          }
+        }
+      },
+      cancel: { label: 'إلغاء' }
+    });
+  };
+
+  const toggleAptSelection = (id: string) => {
+    setSelectedAptIds(prev => 
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const clearAllApartments = async () => {
+    if (apartments.length === 0) return toast.error('لا توجد وحدات لحذفها');
+    
+    toast(`هل أنت متأكد من حذف كافة الوحدات (${apartments.length})؟`, {
+      description: 'سيتم مسح كافة الوحدات المسجلة حالياً. لا يمكن التراجع عن هذا الإجراء.',
+      action: {
+        label: 'تأكيد المسح الشامل',
+        onClick: async () => {
+          const loadingToast = toast.loading('جاري حذف كافة الوحدات...');
+          try {
+            const batchSize = 25;
+            for (let i = 0; i < apartments.length; i += batchSize) {
+              const chunk = apartments.slice(i, i + batchSize);
+              await Promise.all(chunk.map(apt => deleteDoc(doc(db, 'apartments', apt.id))));
+            }
+            toast.dismiss(loadingToast);
+            toast.success('تم إفراغ كافة الوحدات بنجاح');
+          } catch (error) {
+            toast.dismiss(loadingToast);
+            toast.error('حدث خطأ أثناء محاولة الحذف الجماعي');
+            console.error(error);
+          }
+        }
+      },
+      cancel: { label: 'إلغاء' }
+    });
+  };
+
+  const deleteApartment = async (id: string, number: string) => {
+    toast(`هل أنت متأكد من حذف الشقة رقم ${number}؟`, {
+      description: 'لا يمكن التراجع عن هذا الإجراء وسيتم حذف كافة بيانات الوحدة.',
+      action: {
+        label: 'تأكيد الحذف',
+        onClick: async () => {
+          try {
+            await deleteDoc(doc(db, 'apartments', id));
+            toast.success(`تم حذف الشقة ${number} بنجاح`);
+          } catch (error) {
+            console.error('Error deleting apartment:', error);
+            handleFirestoreError(error, OperationType.DELETE, `apartments/${id}`);
+          }
+        }
+      },
+      cancel: {
+        label: 'إلغاء'
+      }
+    });
+  };
   const [viewMode, setViewMode] = useState<'list' | 'summary' | 'calendar'>('list');
   const [selectedApartment, setSelectedApartment] = useState<{ building: string, apartment: string } | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -7937,6 +8038,78 @@ function AppContent() {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-3">
+                    {selectedAptIds.length > 0 && (
+                      <motion.div 
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className="flex items-center gap-2 bg-blue-500/10 border border-blue-500/20 px-4 py-2 rounded-xl mr-2"
+                      >
+                        <span className="text-[10px] font-black text-blue-500">{selectedAptIds.length} محددة</span>
+                        <button 
+                          onClick={() => setSelectedAptIds([])}
+                          className="text-[10px] font-black text-slate-500 hover:text-slate-700 dark:hover:text-white"
+                        >
+                          إلغاء
+                        </button>
+                        <div className="w-px h-4 bg-blue-500/20 mx-1" />
+                        <motion.button
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={deleteSelectedApartments}
+                          className="text-[10px] font-black text-rose-500 hover:text-rose-600 flex items-center gap-1"
+                        >
+                          <Trash2 size={12} />
+                          حذف المحدد
+                        </motion.button>
+                      </motion.div>
+                    )}
+
+                    <div className="relative group mr-4 flex items-center gap-3">
+                      {/* Building Filter */}
+                      <select 
+                        value={aptBuildingFilter}
+                        onChange={(e) => setAptBuildingFilter(e.target.value)}
+                        className="px-4 py-2 bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-xl text-[10px] font-black focus:ring-2 focus:ring-primary outline-none shadow-sm cursor-pointer"
+                      >
+                        <option value="all">كل المباني</option>
+                        {PROPERTY_BUILDINGS.map(pb => (
+                          <option key={pb.id} value={pb.id}>{pb.name}</option>
+                        ))}
+                      </select>
+
+                      {/* Status Filter */}
+                      <select 
+                        value={aptStatusFilter}
+                        onChange={(e) => setAptStatusFilter(e.target.value as any)}
+                        className="px-4 py-2 bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-xl text-[10px] font-black focus:ring-2 focus:ring-primary outline-none shadow-sm cursor-pointer"
+                      >
+                        <option value="all">كل الحالات</option>
+                        <option value="vacant">شاغرة</option>
+                        <option value="occupied">مشغولة</option>
+                      </select>
+
+                      <div className="relative">
+                        <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary transition-colors" size={18} />
+                        <input
+                          type="text"
+                          placeholder="بحث برقم الشقة أو المبنى..."
+                          className="w-64 pr-12 pl-6 py-2.5 bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-xl text-xs font-bold focus:ring-2 focus:ring-primary transition-all outline-none shadow-sm"
+                          value={aptSearch}
+                          onChange={(e) => setAptSearch(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={clearAllApartments}
+                      className="px-6 py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/20 rounded-xl text-xs font-black transition-all flex items-center gap-2"
+                    >
+                      <Trash2 size={16} />
+                      <span>حذف كافة الوحدات</span>
+                    </motion.button>
+
                     <motion.button
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
@@ -7975,92 +8148,208 @@ function AppContent() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                  {PROPERTY_BUILDINGS.map(b => {
-                    const buildingApts = apartments.filter(a => a.buildingId === b.id);
-                    const occupiedCount = buildingApts.filter(a => a.status === 'occupied').length;
-                    const vacantCount = buildingApts.filter(a => a.status === 'vacant').length;
-                    const maintenanceCount = buildingApts.filter(a => a.status === 'maintenance').length;
-                    const occupancyRate = buildingApts.length > 0 ? Math.round((occupiedCount / buildingApts.length) * 100) : 0;
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
+                  {apartments
+                    .filter(apt => {
+                      const b = PROPERTY_BUILDINGS.find(pb => pb.id === apt.buildingId);
+                      const searchLower = aptSearch.toLowerCase();
+                      
+                      // Search check
+                      const matchesSearch = apt.number.includes(aptSearch) || 
+                                           (b?.name || '').toLowerCase().includes(searchLower);
+                      
+                      // Status check
+                      const matchesStatus = aptStatusFilter === 'all' || apt.status === aptStatusFilter;
+                      
+                      // Building check
+                      const matchesBuilding = aptBuildingFilter === 'all' || apt.buildingId === aptBuildingFilter;
 
+                      return matchesSearch && matchesStatus && matchesBuilding;
+                    })
+                    .sort((a, b) => {
+                      const b1 = PROPERTY_BUILDINGS.findIndex(pb => pb.id === a.buildingId);
+                      const b2 = PROPERTY_BUILDINGS.findIndex(pb => pb.id === b.buildingId);
+                      if (b1 !== b2) return b1 - b2;
+                      return a.number.localeCompare(b.number);
+                    }).map(apt => {
+                    const b = PROPERTY_BUILDINGS.find(pb => pb.id === apt.buildingId);
+                    const tenant = (apt.tenantId ? tenants.find(t => t.id === apt.tenantId) : null) || tenants.find(t => t.apartmentId === apt.id);
+                    const num = apt.number;
+                    const floor = Math.floor(parseInt(num) / 100);
+                    
                     return (
                       <motion.div 
-                        key={b.id}
-                        whileHover={{ y: -5 }}
-                        className="bg-gray-50 dark:bg-slate-800/50 rounded-[2.5rem] overflow-hidden border border-transparent hover:border-primary/30 transition-all"
+                        key={apt.id}
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        whileHover={{ y: -5, boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)' }}
+                        onClick={() => {
+                          if (apt.status === 'occupied' && tenant) {
+                            setTenantSearch(tenant.name);
+                            setActiveTab('tenants');
+                          } else if (apt.status === 'vacant') {
+                            setEditingTenant(null);
+                            setTenantForm({
+                              name: '',
+                              nationality: '',
+                              phone: '',
+                              company: '',
+                              idNumber: '',
+                              contractValue: 0,
+                              paymentFrequency: 'monthly',
+                              paymentMethod: 'cash',
+                              buildingName: b?.name || '',
+                              apartmentId: apt.id,
+                              aptNumber: num
+                            } as any);
+                            setIsTenantModalOpen(true);
+                          }
+                        }}
+                        className={cn(
+                          "relative rounded-[2.5rem] p-6 flex flex-col items-center justify-between transition-all cursor-pointer border min-h-[340px]",
+                          "bg-[#111827] dark:bg-[#030712] border-slate-800 shadow-2xl overflow-hidden group"
+                        )}
                       >
-                        <div className="bg-gradient-to-br from-primary to-primary-dark p-8 text-white">
-                          <h3 className="text-xl font-black mb-1">{b.name}</h3>
-                          <p className="text-xs font-bold opacity-80">{buildingApts.length} وحدة سكنية • إشغال {occupancyRate}%</p>
-                        </div>
-                        <div className="p-8">
-                          <div className="grid grid-cols-3 gap-4 mb-6">
-                            <div className="text-center">
-                              <div className="text-2xl font-black text-emerald-600">{occupiedCount}</div>
-                              <div className="text-[10px] font-bold text-gray-400 uppercase">مأهول</div>
-                            </div>
-                            <div className="text-center">
-                              <div className="text-2xl font-black text-amber-600">{vacantCount}</div>
-                              <div className="text-[10px] font-bold text-gray-400 uppercase">شاغر</div>
-                            </div>
-                            <div className="text-center">
-                              <div className="text-2xl font-black text-rose-600">{maintenanceCount}</div>
-                              <div className="text-[10px] font-bold text-gray-400 uppercase">صيانة</div>
-                            </div>
-                          </div>
-                          
-                          <div className="h-2 bg-gray-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                            <div className="h-full bg-primary" style={{ width: `${occupancyRate}%` }} />
-                          </div>
+                        <motion.button
+                          whileHover={{ scale: 1.2, backgroundColor: 'rgba(244, 63, 94, 0.1)' }}
+                          whileTap={{ scale: 0.9 }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteApartment(apt.id, apt.number);
+                          }}
+                          className="absolute top-6 left-6 z-30 p-2.5 text-rose-400 bg-slate-800/50 rounded-xl border border-slate-700/50 hover:text-rose-500 transition-all shadow-lg backdrop-blur-sm"
+                          title="حذف الوحدة"
+                        >
+                          <Trash2 size={18} />
+                        </motion.button>
 
-                          <div className="mt-8 grid grid-cols-4 gap-2">
-                            {b.apartments.map(num => {
-                              const apt = apartments.find(a => a.buildingId === b.id && a.number === num);
-                              const tenant = apt?.tenantId ? tenants.find(t => t.id === apt.tenantId) : null;
-                              
-                              return (
-                                <motion.div 
-                                  key={num}
-                                  whileHover={{ scale: 1.1 }}
-                                  onClick={() => {
-                                    if (apt?.status === 'occupied' && tenant) {
-                                      setTenantSearch(tenant.name);
-                                      setActiveTab('tenants');
-                                    } else if (apt?.status === 'vacant') {
-                                      setEditingTenant(null);
-                                      setTenantForm({
-                                        name: '',
-                                        nationality: '',
-                                        phone: '',
-                                        company: '',
-                                        idNumber: '',
-                                        contractValue: 0,
-                                        paymentFrequency: 'monthly',
-                                        paymentMethod: 'cash',
-                                        buildingName: b.name,
-                                        apartmentId: apt.id,
-                                        aptNumber: num
-                                      } as any);
-                                      setIsTenantModalOpen(true);
-                                    }
-                                  }}
-                                  className={cn(
-                                    "aspect-square rounded-xl flex flex-col items-center justify-center border-2 transition-all cursor-pointer p-1 overflow-hidden",
-                                    apt?.status === 'occupied' ? "bg-primary text-white border-primary shadow-lg shadow-primary/20" :
-                                    apt?.status === 'maintenance' ? "bg-rose-50 border-rose-200 text-rose-600" :
-                                    "bg-white dark:bg-slate-800 border-gray-100 dark:border-slate-700 text-gray-400"
-                                  )}
-                                  title={`شقة ${num} - ${apt?.status === 'occupied' ? `مأهولة (${tenant?.name})` : apt?.status === 'maintenance' ? 'صيانة' : 'شاغرة'}`}
-                                >
-                                  <span className="text-xs font-black">{num}</span>
-                                  {tenant && (
-                                    <span className="text-[7px] font-bold truncate w-full text-center mt-1 opacity-80">
-                                      {tenant.name.split(' ')[0]}
-                                    </span>
-                                  )}
-                                </motion.div>
-                              );
-                            })}
+                        {/* Selection Checkbox */}
+                        <div 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleAptSelection(apt.id);
+                          }}
+                          className={cn(
+                            "absolute top-6 left-20 z-30 w-10 h-10 rounded-xl border-2 flex items-center justify-center transition-all cursor-pointer",
+                            selectedAptIds.includes(apt.id) 
+                              ? "bg-blue-500 border-blue-400 text-white shadow-[0_0_15px_rgba(59,130,246,0.5)]" 
+                              : "bg-slate-800/50 border-slate-700/50 text-transparent hover:border-blue-500/50"
+                          )}
+                        >
+                          <div className={cn(
+                            "w-4 h-4 rounded-full border-2 transition-all",
+                            selectedAptIds.includes(apt.id) ? "bg-white border-white scale-110" : "border-slate-600"
+                          )} />
+                        </div>
+
+                        {/* Status Pill */}
+                        <div className="absolute top-6 right-6 z-20">
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              const newStatus = apt.status === 'vacant' ? 'occupied' : 'vacant';
+                              try {
+                                await updateDoc(doc(db, 'apartments', apt.id), { 
+                                  status: newStatus,
+                                  updatedAt: serverTimestamp() 
+                                });
+                                toast.success(`تم تغيير الحالة إلى ${newStatus === 'vacant' ? 'شاغرة' : 'مشغولة'}`);
+                              } catch (error) {
+                                toast.error('خطأ في تحديث الحالة');
+                              }
+                            }}
+                            className={cn(
+                              "px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all hover:scale-110 active:scale-95 cursor-pointer shadow-lg",
+                              apt.status === 'occupied' ? "bg-emerald-500 text-white shadow-emerald-500/20" :
+                              apt.status === 'maintenance' ? "bg-rose-500 text-white shadow-rose-500/20" :
+                              "bg-blue-500 text-white shadow-blue-500/20"
+                            )}
+                          >
+                            {apt.status === 'occupied' ? 'مشغولة' : apt.status === 'maintenance' ? 'صيانة' : 'شاغرة'}
+                          </button>
+                        </div>
+
+                        {/* Buildling/Icon Header */}
+                        <div className="flex flex-col items-center gap-2 mt-4">
+                          <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center border border-white/10 shadow-inner">
+                            <HomeIcon size={24} className="text-slate-400" />
+                          </div>
+                          <div className="text-center">
+                            <h4 className="text-[10px] font-black tracking-[0.2em] text-slate-500 uppercase">North Residence</h4>
+                            <p className="text-[10px] font-bold text-slate-600 mt-0.5">{b?.name || 'مبنى'}</p>
+                          </div>
+                        </div>
+
+                        {/* Giant Unit Number */}
+                        <div className="relative my-4">
+                          <span className="text-7xl font-black text-white tracking-tighter drop-shadow-[0_0_20px_rgba(255,255,255,0.15)] leading-none block">
+                            {num}
+                          </span>
+                          {/* Subtle Glow Effect */}
+                          <div className="absolute inset-0 bg-blue-500/5 blur-[40px] rounded-full -z-10" />
+                        </div>
+
+                        {/* Floor/Type Badges */}
+                        <div className="flex gap-2">
+                          <div className="px-3 py-1 rounded-xl bg-white/5 border border-white/5 text-[9px] font-black text-slate-400">
+                            شقة
+                          </div>
+                          <div className="px-3 py-1 rounded-xl bg-white/5 border border-white/5 text-[9px] font-black text-slate-400">
+                            الدور {floor}
+                          </div>
+                        </div>
+
+                        {/* Tenant Info */}
+                        <div className="w-full text-center mt-3">
+                          <p className="text-[11px] font-bold text-slate-300 truncate h-4">
+                            {tenant ? tenant.company || tenant.name : 'شاغرة حالياً'}
+                          </p>
+                        </div>
+
+                        {/* Action Icons Row */}
+                        <div className="flex items-center gap-4 mt-6">
+                          <div 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (tenant?.phone) {
+                                window.open(`https://wa.me/${tenant.phone.replace(/\s+/g, '')}`, '_blank');
+                              } else {
+                                toast.error('لا يوجد رقم هاتف مسجل لهذا الساكن');
+                              }
+                            }}
+                            className={cn(
+                              "w-10 h-10 rounded-2xl border flex flex-col items-center justify-center group/btn transition-all cursor-pointer",
+                              tenant?.phone 
+                                ? "bg-green-500/10 border-green-500/20 hover:bg-green-500/20" 
+                                : "bg-white/5 border-white/5 opacity-40 grayscale"
+                            )}
+                            title={tenant?.phone ? `واتساب: ${tenant.phone}` : "لا يوجد رقم هاتف"}
+                          >
+                            <MessageCircle size={14} className={tenant?.phone ? "text-green-400" : "text-slate-500"} />
+                            <span className={cn(
+                              "text-[7px] font-black mt-1",
+                              tenant?.phone ? "text-green-500/70" : "text-slate-600"
+                            )}>WHATSAPP</span>
+                          </div>
+                          <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 flex flex-col items-center justify-center group/btn hover:bg-emerald-500/30 transition-colors">
+                            <UserCheck size={18} className="text-emerald-400" />
+                            <span className="text-[8px] font-black mt-1 text-emerald-500/70">CHECK IN</span>
+                          </div>
+                          <div className="w-10 h-10 rounded-2xl bg-white/5 border border-white/5 flex flex-col items-center justify-center group/btn hover:bg-white/10 transition-colors">
+                            <Sparkles size={14} className="text-slate-500 group-hover/btn:text-emerald-400 transition-colors" />
+                            <span className="text-[7px] font-black mt-1 text-slate-600">CLEAN</span>
+                          </div>
+                        </div>
+
+                        {/* Footer Button */}
+                        <div onClick={(e) => {
+                          e.stopPropagation();
+                          // Simulated doorbell
+                        }} className="w-full mt-6 py-4 rounded-[1.5rem] bg-white/5 border border-white/10 hover:bg-white/10 transition-all flex items-center justify-center gap-3 group/door">
+                          <span className="text-[10px] font-black tracking-widest text-slate-400 group-hover/door:text-white transition-colors uppercase">Doorbell</span>
+                          <div className="relative">
+                            <Bell size={16} className="text-slate-500 group-hover/door:text-white transition-colors" />
+                            <div className="absolute top-0 right-0 w-1.5 h-1.5 bg-rose-500 rounded-full animate-ping" />
                           </div>
                         </div>
                       </motion.div>
@@ -8076,12 +8365,12 @@ function AppContent() {
               {/* Statistics Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
                 {[
-                  { label: 'إجمالي الوحدات', value: 137, icon: Home, color: 'slate' },
+                  { label: 'إجمالي الوحدات', value: apartments.length || 150, icon: Home, color: 'slate' },
                   { label: 'المؤجرة', value: tenants.length, icon: Users, color: 'blue' },
                   { label: 'الشاغرة', value: apartments.filter(a => a.status === 'vacant').length, icon: AlertCircle, color: 'amber' },
                   { label: 'غرفة وصالة', value: apartments.filter(a => a.roomType === 'غرفة و صالة').length, icon: Layout, color: 'slate' },
                   { label: 'غرفتين وصالة', value: apartments.filter(a => a.roomType === 'غرفتين و صالة').length, icon: LayoutDashboard, color: 'slate' },
-                  { label: 'نسبة الإشغال', value: `${Math.round((tenants.length / 137) * 100)}%`, icon: PieChart, color: 'blue' },
+                  { label: 'نسبة الإشغال', value: `${apartments.length > 0 ? Math.round((tenants.length / apartments.length) * 100) : 0}%`, icon: PieChart, color: 'blue' },
                 ].map((stat, i) => (
                   <motion.div
                     key={i}
@@ -8304,27 +8593,30 @@ function AppContent() {
                             key={tenant.id}
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
-                            className="group hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition-all font-cairo"
+                            className="group hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition-all font-cairo border-b last:border-0"
                           >
-                            <td className="px-8 py-8">
-                              <div className="flex items-center gap-5">
-                                <div className="w-14 h-14 bg-primary/10 rounded-2xl flex items-center justify-center text-primary font-black text-xl group-hover:scale-110 transition-transform">
-                                  {tenant.name.charAt(0)}
-                                </div>
-                                <div>
-                                  <div className="font-black text-gray-900 dark:text-white text-lg leading-tight group-hover:text-primary transition-colors">{tenant.name}</div>
-                                  <div className="text-[11px] font-bold text-gray-400 mt-1.5 flex items-center gap-3">
-                                    <span className="flex items-center gap-1"><Phone size={12} className="opacity-70" /> {tenant.phone}</span>
-                                    <span className="opacity-30">•</span>
-                                    <span className="flex items-center gap-1"><IdCard size={12} className="opacity-70" /> {tenant.idNumber}</span>
+                            <td className="px-8 py-6">
+                              <div className="flex items-center gap-6 justify-end">
+                                <div className="text-right">
+                                  <div className="font-black text-gray-900 dark:text-white text-xl leading-tight group-hover:text-primary transition-colors">{tenant.name}</div>
+                                  <div className="text-[12px] font-bold text-gray-400 mt-2 flex items-center gap-2 justify-end">
+                                    <Phone size={14} className="text-slate-300" />
+                                    <span>{tenant.phone}</span>
+                                    <span className="opacity-30 mx-1">•</span>
+                                    <div className="w-5 h-5 bg-primary/10 rounded-md flex items-center justify-center text-primary">
+                                      <Sparkles size={10} />
+                                    </div>
                                   </div>
+                                </div>
+                                <div className="w-16 h-16 bg-blue-50 dark:bg-blue-900/20 rounded-2xl flex items-center justify-center text-primary font-black text-2xl shadow-sm border border-blue-100/50 dark:border-blue-900/30">
+                                  {tenant.name.charAt(0)}
                                 </div>
                               </div>
                             </td>
-                            <td className="px-6 py-8">
-                              <div className="flex flex-col gap-1.5">
-                                <div className="text-sm font-black text-gray-900 dark:text-white">شقة {apt?.number}</div>
-                                <div className="text-[10px] font-black text-primary bg-primary/5 px-2.5 py-1 rounded-lg w-fit border border-primary/10 tracking-widest">{building?.name || 'مبنى'}</div>
+                            <td className="px-6 py-6">
+                              <div className="flex flex-col gap-2 items-end">
+                                <div className="text-lg font-black text-gray-900 dark:text-white">شقة {apt?.number}</div>
+                                <div className="text-[10px] font-black text-primary bg-primary/5 px-4 py-1.5 rounded-xl border border-primary/10 tracking-[0.1em]">{building?.name || 'مبنى'}</div>
                               </div>
                             </td>
                             <td className="px-6 py-8">
