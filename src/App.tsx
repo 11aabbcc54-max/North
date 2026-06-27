@@ -55,6 +55,7 @@ import {
   Search,
   ChevronRight,
   ChevronLeft,
+  ChevronDown,
   Printer,
   X,
   Upload,
@@ -67,9 +68,11 @@ import {
   PieChart,
   DollarSign,
   Car,
+  Gamepad2,
   Pencil,
   ListTodo,
   CalendarCheck,
+  CalendarPlus,
   Save,
   Repeat,
   AlertCircle,
@@ -80,12 +83,15 @@ import {
   Image as ImageIcon,
   Download,
   Eye,
+  MessageSquare,
+  Send,
   Link as LinkIcon,
   Settings,
   XCircle,
   CheckCircle,
   Check,
   Palette,
+  Edit2,
   Sun,
   Moon,
   TrendingUp,
@@ -95,11 +101,16 @@ import {
   Users,
   Ban,
   Bell,
+  BellRing,
   ArrowRightLeft,
+  Mic,
   MicOff,
   UserCheck,
   Sparkles,
-  Home as HomeIcon
+  Home as HomeIcon,
+  RotateCcw,
+  Key,
+  Lock,
 } from 'lucide-react';
 import { 
   format, 
@@ -118,6 +129,7 @@ import {
   isWithinInterval,
   startOfDay,
   endOfDay,
+  isBefore,
   differenceInDays
 } from 'date-fns';
 import { ar } from 'date-fns/locale';
@@ -149,6 +161,22 @@ interface CleaningRequest {
   isRecurring?: boolean;
   selectedMonths?: number[];
   recurrenceDay?: number;
+  isSubscription?: boolean;
+  subscriptionEndDate?: Timestamp;
+  subscriptionStartDate?: Timestamp;
+  subscriptionSchedule?: number[]; // [0,1,2,3,4,5,6]
+  subscriptionFrequency?: string;
+  completedDates?: string[]; // array of 'YYYY-MM-DD'
+  unitPrice?: number;
+  car?: string;
+  apartment?: string;
+  subscriptionPayments?: {
+    monthKey: string;     // e.g "2026-06"
+    monthName: string;    // e.g "يونيو 2026"
+    isPaid: boolean;
+    amount: number;
+    paidDate?: string;    // YYYY-MM-DD
+  }[];
 }
 
 interface InventoryItem {
@@ -189,6 +217,8 @@ interface ClubSubscription {
   status: 'active' | 'expired' | 'locked';
   paymentStatus: 'unpaid' | 'paid';
   createdAt: Timestamp;
+  phone?: string;
+  notes?: string;
 }
 
 interface Booking {
@@ -213,6 +243,7 @@ interface Apartment {
   status: 'occupied' | 'vacant' | 'maintenance';
   roomType?: string;
   tenantId?: string;
+  secretCode?: string;
 }
 
 interface RentPayment {
@@ -269,7 +300,8 @@ const SERVICES = [
   { name: 'رش حشرات', price: 150 },
   { name: 'مدفوع من منصة إيجار', price: 0 },
   { name: 'مدفوع مع الإيجار', price: 0 },
-  { name: 'توصيل مياه', price: 10 }
+  { name: 'توصيل مياه', price: 10 },
+  { name: 'حجز غرفة الألعاب', price: 50 }
 ];
 
 const MAINTENANCE_SERVICES = [
@@ -289,21 +321,54 @@ const MAINTENANCE_WORKERS = [
 
 // --- Helpers ---
 const safeToDate = (timestamp: any): Date => {
-  if (timestamp && typeof timestamp.toDate === 'function') {
+  if (!timestamp) return new Date();
+  if (typeof timestamp.toDate === 'function') {
     try {
       return timestamp.toDate();
     } catch (e) {
-      return new Date();
+      // fallback
     }
   }
+  if (typeof timestamp.seconds === 'number') {
+    return new Date(timestamp.seconds * 1000);
+  }
   if (timestamp instanceof Date) return timestamp;
+  if (typeof timestamp === 'string') {
+    const d = new Date(timestamp);
+    if (!isNaN(d.getTime())) return d;
+  }
   return new Date();
+};
+
+const getApartmentNum = (sub: CleaningRequest) => {
+  if (sub.apartment) return sub.apartment;
+  if (!sub.notes) return 'غير محدد';
+  const match = sub.notes.match(/الشقة:\s*([^\s|]+)/);
+  if (match) return match[1];
+  return 'غير محدد';
+};
+
+const getCarName = (sub: CleaningRequest) => {
+  if (sub.car) return sub.car;
+  if (!sub.notes) return 'سيارة غير محددة';
+  const match = sub.notes.match(/السيارة:\s*([^|]+)/);
+  if (match) return match[1].trim();
+  return sub.notes;
+};
+
+const getScheduleDaysArabic = (schedule?: number[]) => {
+  if (!schedule || schedule.length === 0) return 'جميع الأيام';
+  if (schedule.length === 7) return 'يومياً';
+  const dayNames = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+  return schedule.map(d => dayNames[d]).join(' - ');
 };
 
 // --- Components ---
 
 const PublicBookingForm = ({ appName, logo }: { appName: string, logo: string | null }) => {
   const [lang, setLang] = useState<'ar' | 'en'>('ar');
+  const [adminPhone, setAdminPhone] = useState('');
+  const [whatsappGroupLink, setWhatsappGroupLink] = useState('');
   const [formData, setFormData] = useState({
     customerName: '',
     customerPhone: '',
@@ -315,6 +380,20 @@ const PublicBookingForm = ({ appName, logo }: { appName: string, logo: string | 
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+
+  useEffect(() => {
+    getDoc(doc(db, 'settings', 'branding')).then(docSnap => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.adminPhone) {
+          setAdminPhone(data.adminPhone);
+        }
+        if (data.whatsappGroupLink) {
+          setWhatsappGroupLink(data.whatsappGroupLink);
+        }
+      }
+    }).catch(err => console.error("Error loading branding in PublicBookingForm:", err));
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -339,7 +418,7 @@ const PublicBookingForm = ({ appName, logo }: { appName: string, logo: string | 
 
   const t = {
     ar: {
-      title: 'حجز خدمة نظافة',
+      title: 'حجز الخدمات والمرافق',
       name: 'الاسم',
       phone: 'رقم الجوال',
       building: 'اسم المبنى',
@@ -352,7 +431,7 @@ const PublicBookingForm = ({ appName, logo }: { appName: string, logo: string | 
       newBooking: 'حجز جديد'
     },
     en: {
-      title: 'Book Cleaning Service',
+      title: 'Service & Facility Booking',
       name: 'Name',
       phone: 'Phone Number',
       building: 'Building Name',
@@ -367,6 +446,47 @@ const PublicBookingForm = ({ appName, logo }: { appName: string, logo: string | 
   }[lang];
 
   if (isSuccess) {
+    const handleNotifyAdmin = () => {
+      const msg = lang === 'ar' 
+        ? `*طلب حجز جديد 🔔*\n\n` +
+          `• *الاسم:* ${formData.customerName}\n` +
+          `• *رقم الجوال:* ${formData.customerPhone}\n` +
+          `• *العقار:* ${formData.buildingName} - شقة ${formData.apartmentNumber}\n` +
+          `• *الخدمة:* ${formData.serviceType}\n` +
+          `• *التاريخ والوقت:* ${formData.date} في تمام الساعة ${formData.time}\n\n` +
+          `[ تم تأكيد إرسال الطلب والدفع ]`
+        : `*New Booking Request 🔔*\n\n` +
+          `• *Name:* ${formData.customerName}\n` +
+          `• *Phone:* ${formData.customerPhone}\n` +
+          `• *Unit:* ${formData.buildingName} - Unit ${formData.apartmentNumber}\n` +
+          `• *Service:* ${formData.serviceType}\n` +
+          `• *Date/Time:* ${formData.date} at ${formData.time}\n\n` +
+          `[ Request & Payment submitted successfully ]`;
+      
+      const cleanPhone = adminPhone.replace(/\s+/g, '').replace('+', '');
+      window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+    };
+
+    const handleNotifyGroup = () => {
+      const msg = lang === 'ar' 
+        ? `*تأكيد دفع حجز جديد 🔔💰*\n\n` +
+          `• *الاسم:* ${formData.customerName}\n` +
+          `• *رقم الجوال:* ${formData.customerPhone}\n` +
+          `• *العقار:* ${formData.buildingName} - شقة ${formData.apartmentNumber}\n` +
+          `• *الخدمة:* ${formData.serviceType}\n` +
+          `• *التاريخ والوقت:* ${formData.date} في تمام الساعة ${formData.time}\n\n` +
+          `[ تم تأكيد إرسال الطلب وإرفاق إشعار الدفع ]`
+        : `*Payment Confirmation for New Booking 🔔💰*\n\n` +
+          `• *Name:* ${formData.customerName}\n` +
+          `• *Phone:* ${formData.customerPhone}\n` +
+          `• *Unit:* ${formData.buildingName} - Unit ${formData.apartmentNumber}\n` +
+          `• *Service:* ${formData.serviceType}\n` +
+          `• *Date/Time:* ${formData.date} at ${formData.time}\n\n` +
+          `[ Request & Payment proof submitted successfully ]`;
+      
+      window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
+    };
+
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
         <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="bg-white p-10 rounded-[2.5rem] shadow-2xl max-w-md w-full text-center">
@@ -374,7 +494,40 @@ const PublicBookingForm = ({ appName, logo }: { appName: string, logo: string | 
             <CheckCircle2 className="text-green-500 w-12 h-12" />
           </div>
           <h2 className="text-2xl font-black mb-4">{t.success}</h2>
-          <button onClick={() => setIsSuccess(false)} className="bg-primary text-white px-8 py-3 rounded-xl font-bold">{t.newBooking}</button>
+          
+          {whatsappGroupLink && (
+            <div className="space-y-3 mb-4">
+              <a 
+                href={whatsappGroupLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full bg-blue-500 hover:bg-blue-600 transition-colors text-white py-4 px-6 rounded-2xl font-black text-sm flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-blue-500/15"
+              >
+                <Users size={20} />
+                {lang === 'ar' ? 'الانضمام لمجموعة تتبع الدفع (واتساب)' : 'Join Payment Tracking Group'}
+              </a>
+              
+              <button 
+                onClick={handleNotifyGroup} 
+                className="w-full bg-emerald-600 hover:bg-emerald-700 transition-colors text-white py-4 px-6 rounded-2xl font-black text-sm flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-emerald-500/15"
+              >
+                <MessageCircle size={20} />
+                {lang === 'ar' ? 'أرسل إشعار الدفع إلى المجموعة' : 'Send Payment Message to Group'}
+              </button>
+            </div>
+          )}
+
+          {adminPhone && (
+            <button 
+              onClick={handleNotifyAdmin} 
+              className="w-full bg-emerald-500 hover:bg-emerald-600 transition-colors text-white py-4 px-6 rounded-2xl font-black text-sm mb-4 flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-emerald-500/15"
+            >
+              <MessageCircle size={20} />
+              {lang === 'ar' ? 'إرسال إشعار الدفع للمدير عبر الواتساب' : 'Notify Manager via WhatsApp'}
+            </button>
+          )}
+
+          <button onClick={() => setIsSuccess(false)} className="w-full bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors text-gray-800 dark:text-slate-200 py-3 rounded-xl font-bold cursor-pointer">{t.newBooking}</button>
         </motion.div>
       </div>
     );
@@ -432,6 +585,333 @@ const PublicBookingForm = ({ appName, logo }: { appName: string, logo: string | 
             </div>
             <button disabled={isSubmitting} type="submit" className="w-full py-4 bg-primary text-white rounded-2xl font-black shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50">
               {isSubmitting ? (lang === 'ar' ? 'جاري الإرسال...' : 'Sending...') : t.submit}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const PublicClubRenewalForm = ({ appName, logo, subId }: { appName: string, logo: string | null, subId: string | null }) => {
+  const [lang, setLang] = useState<'ar' | 'en'>('ar');
+  const [adminPhone, setAdminPhone] = useState('');
+  const [whatsappGroupLink, setWhatsappGroupLink] = useState('');
+  const [subscription, setSubscription] = useState<ClubSubscription | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  const [monthsCount, setMonthsCount] = useState<number>(1);
+  const [startDate, setStartDate] = useState<string>('');
+  const [phone, setPhone] = useState<string>('');
+  
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+
+  useEffect(() => {
+    getDoc(doc(db, 'settings', 'branding')).then(docSnap => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.adminPhone) {
+          setAdminPhone(data.adminPhone);
+        }
+        if (data.whatsappGroupLink) {
+          setWhatsappGroupLink(data.whatsappGroupLink);
+        }
+      }
+    }).catch(err => console.error("Error loading branding in PublicClubRenewalForm:", err));
+  }, []);
+
+  useEffect(() => {
+    async function fetchSub() {
+      if (!subId) {
+        setError(lang === 'ar' ? 'رابط تجديد غير صالح' : 'Invalid renewal link');
+        setLoading(false);
+        return;
+      }
+      try {
+        const docRef = doc(db, 'clubSubscriptions', subId);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data() as ClubSubscription;
+          setSubscription({ id: docSnap.id, ...data });
+          
+          setPhone(data.phone || '');
+          
+          const prevEndDate = data.endDate instanceof Timestamp ? data.endDate.toDate() : new Date(data.endDate);
+          const tomorrowOfEnd = addDays(prevEndDate, 1);
+          const today = new Date();
+          const defaultStart = tomorrowOfEnd > today ? tomorrowOfEnd : today;
+          setStartDate(format(defaultStart, 'yyyy-MM-dd'));
+        } else {
+          setError(lang === 'ar' ? 'الاشتراك غير موجود' : 'Subscription not found');
+        }
+      } catch (err) {
+        console.error(err);
+        setError(lang === 'ar' ? 'حدث خطأ أثناء تحميل بيانات الاشتراك' : 'Error loading subscription data');
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchSub();
+  }, [subId, lang]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!subscription) return;
+    setIsSubmitting(true);
+    try {
+      const pricePerMonth = 300;
+      const amount = monthsCount * pricePerMonth;
+      const start = new Date(startDate);
+      const end = addMonths(start, monthsCount);
+      
+      await addDoc(collection(db, 'clubSubscriptions'), {
+        name: subscription.name,
+        workplace: subscription.workplace,
+        phone: phone,
+        monthsCount: monthsCount,
+        totalPrice: amount,
+        collectedAmount: 0,
+        startDate: Timestamp.fromDate(start),
+        endDate: Timestamp.fromDate(end),
+        status: 'active',
+        paymentStatus: 'unpaid',
+        notes: lang === 'ar' ? 'طلب تجديد تلقائي عبر الرابط' : 'Automatic renewal request via link',
+        createdAt: Timestamp.now(),
+        userId: subscription.userId || ''
+      });
+      setIsSuccess(true);
+      toast.success(lang === 'ar' ? 'تم إرسال طلب التجديد بنجاح' : 'Renewal request sent successfully');
+    } catch (err) {
+      console.error(err);
+      toast.error(lang === 'ar' ? 'حدث خطأ أثناء تقديم الطلب' : 'Error submitting renewal request');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const t = {
+    ar: {
+      title: 'تجديد اشتراك النادي الرياضي',
+      submitting: 'جاري تسليم الطلب...',
+      submit: 'تقديم طلب التجديد',
+      loading: 'جاري تحميل تفاصيل اشتراكك...',
+      notFound: 'الاشتراك غير موجود أو الرابط غير صالح.',
+      welcome: 'أهلاً بك،',
+      subDetails: 'تفاصيل اشتراكك الحالي:',
+      prevEnd: 'تاريخ انتهاء الاشتراك السابق',
+      newDuration: 'مدة التجديد المطلوبة',
+      newStart: 'تاريخ بدء الاشتراك الجديد',
+      phone: 'رقم الجوال لتأكيد التواصل',
+      totalPrice: 'المبلغ الإجمالي المستحق الدفع',
+      successMsg: 'تم تقديم طلب تجديد اشتراكك بنجاح! سيتم مراجعة الطلب وتفعيل اشتراكك فور سداد الرسوم لدى الإدارة. شكراً لك!',
+      months: 'أشهر',
+      month: 'شهر واحد',
+      sar: 'ريال',
+    },
+    en: {
+      title: 'Renew Club Subscription',
+      submitting: 'Submitting request...',
+      submit: 'Submit Renewal Request',
+      loading: 'Loading subscription details...',
+      notFound: 'Subscription not found or link is invalid.',
+      welcome: 'Welcome,',
+      subDetails: 'Current subscription details:',
+      prevEnd: 'Previous subscription end date',
+      newDuration: 'Requested renewal duration',
+      newStart: 'New subscription start date',
+      phone: 'Contact phone number',
+      totalPrice: 'Total price to pay',
+      successMsg: 'Your renewal request has been submitted successfully! It will be reviewed and activated once fees are paid at the administration office. Thank you!',
+      months: 'months',
+      month: '1 month',
+      sar: 'SAR',
+    }
+  }[lang];
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }} className="rounded-full h-12 w-12 border-4 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (error || !subscription) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+        <div className="bg-white p-8 rounded-[2.5rem] shadow-xl max-w-md w-full text-center">
+          <div className="bg-rose-100 p-5 rounded-3xl w-20 h-20 flex items-center justify-center mx-auto mb-6">
+            <X className="text-rose-500 w-10 h-10" />
+          </div>
+          <h2 className="text-xl font-black mb-4">{error || t.notFound}</h2>
+          <button onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')} className="bg-gray-100 text-gray-600 px-6 py-2 rounded-xl font-bold">
+            {lang === 'ar' ? 'English' : 'العربية'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (isSuccess) {
+    const handleNotifyAdmin = () => {
+      const pricePerMonth = 300;
+      const amount = monthsCount * pricePerMonth;
+      const msg = lang === 'ar'
+        ? `*طلب تجديد اشتراك نادي 🏋️‍♂️*\n\n` +
+          `• *المشترك:* ${subscription?.name || ''}\n` +
+          `• *رقم الجوال:* ${phone}\n` +
+          `• *المدة:* ${monthsCount} أشهر\n` +
+          `• *المبلغ الإجمالي:* ${amount} ريال\n` +
+          `• *تاريخ بدء الاشتراك المقترح:* ${startDate}\n\n` +
+          `[ تم تأكيد إرسال طلب التجديد عبر البوابة ]`
+        : `*Club Subscription Renewal Request 🏋️‍♂️*\n\n` +
+          `• *Member:* ${subscription?.name || ''}\n` +
+          `• *Phone:* ${phone}\n` +
+          `• *Duration:* ${monthsCount} months\n` +
+          `• *Total Price:* ${amount} SAR\n` +
+          `• *Start Date:* ${startDate}\n\n` +
+          `[ Subscription renewal request details submitted ]`;
+
+      const cleanPhone = adminPhone.replace(/\s+/g, '').replace('+', '');
+      window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+    };
+
+    const handleNotifyGroup = () => {
+      const pricePerMonth = 300;
+      const amount = monthsCount * pricePerMonth;
+      const msg = lang === 'ar'
+        ? `*تأكيد دفع تجديد اشتراك نادي 🏋️‍♂️💰*\n\n` +
+          `• *المشترك:* ${subscription?.name || ''}\n` +
+          `• *رقم الجوال:* ${phone}\n` +
+          `• *المدة:* ${monthsCount} أشهر\n` +
+          `• *المبلغ المحول:* ${amount} ريال\n` +
+          `• *تاريخ بدء الاشتراك:* ${startDate}\n\n` +
+          `[ تم تأكيد الدفع وإرفاق إشعار التحويل لتتبع الحالة ]`
+        : `*Payment proof for Club Subscription Renewal 🏋️‍♂️💰*\n\n` +
+          `• *Member:* ${subscription?.name || ''}\n` +
+          `• *Phone:* ${phone}\n` +
+          `• *Duration:* ${monthsCount} months\n` +
+          `• *Amount Paid:* ${amount} SAR\n` +
+          `• *Start Date:* ${startDate}\n\n` +
+          `[ Payment verification and tracking required ]`;
+
+      window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
+    };
+
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+        <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="bg-white p-10 rounded-[2.5rem] shadow-2xl max-w-md w-full text-center">
+          <div className="bg-green-100 p-5 rounded-3xl w-24 h-24 flex items-center justify-center mx-auto mb-8">
+            <CheckCircle2 className="text-green-500 w-12 h-12" />
+          </div>
+          <h2 className="text-2xl font-black mb-4">{lang === 'ar' ? 'تم استلام طلب التجديد!' : 'Renewal request received!'}</h2>
+          <p className="text-gray-500 font-bold mb-8 leading-relaxed text-center">{t.successMsg}</p>
+          
+          {whatsappGroupLink && (
+            <div className="space-y-3 mb-4">
+              <a 
+                href={whatsappGroupLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full bg-blue-500 hover:bg-blue-600 transition-colors text-white py-4 px-6 rounded-2xl font-black text-sm flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-blue-500/15"
+              >
+                <Users size={20} />
+                {lang === 'ar' ? 'الانضمام لمجموعة تتبع الدفع (واتساب)' : 'Join Payment Tracking Group'}
+              </a>
+              
+              <button 
+                onClick={handleNotifyGroup} 
+                className="w-full bg-emerald-600 hover:bg-emerald-700 transition-colors text-white py-4 px-6 rounded-2xl font-black text-sm flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-emerald-500/15"
+              >
+                <MessageCircle size={20} />
+                {lang === 'ar' ? 'أرسل إشعار الدفع إلى المجموعة' : 'Send Payment Message to Group'}
+              </button>
+            </div>
+          )}
+
+          {adminPhone && (
+            <button 
+              onClick={handleNotifyAdmin} 
+              className="w-full bg-emerald-500 hover:bg-emerald-600 transition-colors text-white py-4 px-6 rounded-2xl font-black text-sm flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-emerald-500/15"
+            >
+              <MessageCircle size={20} />
+              {lang === 'ar' ? 'تأكيد وإرسال إشعار التجديد للمدير عبر واتساب' : 'Confirm & Notify Manager via WhatsApp'}
+            </button>
+          )}
+        </motion.div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 py-12 px-4" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+      <div className="max-w-md mx-auto">
+        <div className="flex justify-end mb-6">
+          <button onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')} className="bg-white px-4 py-2 rounded-xl shadow-sm font-bold text-sm flex items-center gap-2">
+            <Globe size={16} />
+            {lang === 'ar' ? 'English' : 'العربية'}
+          </button>
+        </div>
+        <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-gray-100">
+          <div className="text-center mb-8">
+            {logo && <img src={logo} alt="Logo" className="h-16 mx-auto mb-4" />}
+            <h1 className="text-2xl font-black text-gray-900">{t.title}</h1>
+            <p className="text-gray-500 font-bold mt-2">{t.welcome} {subscription.name}</p>
+          </div>
+
+          <div className="bg-primary/5 p-4 rounded-2xl mb-6 border border-primary/10 space-y-2 text-sm text-right">
+            <p className="font-bold text-gray-400">{t.subDetails}</p>
+            <div className="flex justify-between font-black text-gray-700">
+              <span>{lang === 'ar' ? 'مكان العمل:' : 'Workplace:'}</span>
+              <span>{subscription.workplace === 'other' ? (subscription as any).customWorkplace || 'أخرى' : subscription.workplace}</span>
+            </div>
+            <div className="flex justify-between font-black text-gray-700 font-mono">
+              <span>{t.prevEnd}:</span>
+              <span>{format(safeToDate(subscription.endDate), 'yyyy/MM/dd')}</span>
+            </div>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div>
+              <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">{t.newDuration}</label>
+              <div className="grid grid-cols-4 gap-2">
+                {[1, 3, 6, 12].map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMonthsCount(m)}
+                    className={cn(
+                      "py-3 rounded-xl font-black text-xs transition-all border-2",
+                      monthsCount === m
+                        ? "bg-primary text-white border-primary shadow-lg shadow-primary/20"
+                        : "bg-gray-50 text-gray-500 border-transparent hover:border-primary/20 border-gray-100 dark:border-slate-800"
+                    )}
+                  >
+                    {m} {m === 1 ? t.month : `${m} ${t.months}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">{t.newStart}</label>
+              <input required type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full px-6 py-4 bg-gray-50 rounded-2xl border-none focus:ring-2 focus:ring-primary transition-all font-bold" />
+            </div>
+
+            <div>
+              <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">{t.phone}</label>
+              <input required type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="05xxxxxxxx" className="w-full px-6 py-4 bg-gray-50 rounded-2xl border-none focus:ring-2 focus:ring-primary transition-all font-bold text-right" dir="ltr" />
+            </div>
+
+            <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100 flex justify-between items-center text-sm font-black text-emerald-800">
+              <span>{t.totalPrice}:</span>
+              <span className="text-lg">{monthsCount * 300} {t.sar}</span>
+            </div>
+
+            <button disabled={isSubmitting} type="submit" className="w-full py-4 bg-primary text-white rounded-2xl font-black shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50">
+              {isSubmitting ? t.submitting : t.submit}
             </button>
           </form>
         </div>
@@ -877,6 +1357,110 @@ const StaffReport = React.forwardRef<HTMLDivElement, { requests: CleaningRequest
   );
 });
 
+const ClubSubscriptionForm = React.forwardRef<HTMLDivElement, { subscription: ClubSubscription, tenants: Tenant[] }>(({ subscription, tenants }, ref) => {
+  const matchingTenant = tenants.find(t => 
+    t.name === subscription.name || 
+    t.name.includes(subscription.name) || 
+    subscription.name.includes(t.name)
+  );
+  const phone = matchingTenant?.phone || '';
+
+  return (
+    <div ref={ref} className="p-16 bg-white text-black font-sans dir-rtl max-w-[800px] mx-auto text-right leading-loose" dir="rtl" style={{ fontSize: '16px' }}>
+      {/* Title */}
+      <div className="text-center mb-12 mt-4">
+        <h1 className="text-3xl font-black text-black pb-4 inline-block px-12 tracking-wide">
+          تعهد وإقرار اشتراك
+        </h1>
+      </div>
+
+      {/* Subscriber Information Section */}
+      <div className="space-y-6 mb-12">
+        <h2 className="text-xl font-bold text-black border-r-4 border-black pr-3 mb-6">
+          بيانات المشترك
+        </h2>
+        
+        <div className="space-y-5 pr-4">
+          <div className="flex items-center gap-2">
+            <span className="font-extrabold whitespace-nowrap min-w-[120px] text-gray-700">الاسم:</span>
+            <span className="border-b border-dashed border-gray-400 flex-1 pb-1 font-bold text-lg pr-2">
+              {subscription.name}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="font-extrabold whitespace-nowrap min-w-[120px] text-gray-700">رقم الجوال:</span>
+            <span className="border-b border-dashed border-gray-400 flex-1 pb-1 font-bold text-lg pr-2">
+              {phone || '_____________________'}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="font-extrabold whitespace-nowrap min-w-[120px] text-gray-700">مكان العمل:</span>
+            <span className="border-b border-dashed border-gray-400 flex-1 pb-1 font-bold text-lg pr-2">
+              {subscription.workplace || '_____________________'}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="font-extrabold whitespace-nowrap min-w-[120px] text-gray-700">مدة الاشتراك:</span>
+            <span className="border-b border-dashed border-gray-400 flex-1 pb-1 font-bold text-lg pr-2">
+              {subscription.monthsCount} {subscription.monthsCount === 1 ? 'شهر واحد' : subscription.monthsCount === 3 ? 'ثلاثة أشهر' : subscription.monthsCount === 6 ? 'ستة أشهر' : `${subscription.monthsCount} شهراً`} (من {format(safeToDate(subscription.startDate), 'yyyy/MM/dd')} إلى {format(safeToDate(subscription.endDate), 'yyyy/MM/dd')})
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <hr className="border-gray-200 my-10" />
+
+      {/* Declarations and Pledge */}
+      <div className="space-y-6 text-justify">
+        <h2 className="text-xl font-bold text-black border-r-4 border-black pr-3 mb-6">
+          الإقرار والتعهد
+        </h2>
+        
+        <p className="text-black leading-loose text-base" style={{ textIndent: '2rem' }}>
+          أقر أنا الموقع أدناه، وبكامل أهليتي القانونية، بأن جميع البيانات المدونة أعلاه صحيحة، وأنني اطلعت على أنظمة وتعليمات وشروط الاشتراك الخاصة بالمجمع، وأتعهد بالالتزام بها طوال مدة الاشتراك.
+        </p>
+
+        <p className="text-black leading-loose text-base" style={{ textIndent: '2rem' }}>
+          كما أقر وأوافق بأنه في حال صدور أي مخالفة أو حدوث أي مشكلة أو تصرف غير لائق من جانبي، أو الإخلال بأي من الأنظمة والتعليمات أو الشروط المعتمدة لدى المجمع، فإنه يحق لإدارة المجمع إنهاء أو فسخ الاشتراك بشكل فوري، وإنهاء المدة المتبقية من الاشتراك دون الرجوع إليّ، ودون المطالبة بأي تعويض أو استرداد للرسوم أو المبالغ المدفوعة.
+        </p>
+
+        <p className="text-black leading-loose text-base" style={{ textIndent: '2rem' }}>
+          وبهذا أوقع على هذا التعهد والإقرار بمحض إرادتي، وأتحمل كامل المسؤولية المترتبة على مخالفتي للأنظمة والتعليمات المعمول بها.
+        </p>
+      </div>
+
+      <hr className="border-gray-200 my-10" />
+
+      {/* Signature Area */}
+      <div className="mt-14 space-y-6 w-3/4 mr-auto pl-6">
+        <div className="flex items-center gap-2">
+          <span className="font-extrabold whitespace-nowrap min-w-[130px] text-gray-700">اسم المشترك:</span>
+          <span className="border-b border-dashed border-gray-400 flex-1 pb-1 font-bold text-lg pr-2">
+            {subscription.name}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="font-extrabold whitespace-nowrap min-w-[130px] text-gray-700">التوقيع:</span>
+          <span className="border-b border-dashed border-gray-400 flex-1 pb-1 pr-2 text-gray-400 text-sm">
+            ____________________________________
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="font-extrabold whitespace-nowrap min-w-[130px] text-gray-700">التاريخ:</span>
+          <span className="border-b border-dashed border-gray-400 flex-1 pb-1 font-bold text-lg pr-2 text-right" dir="rtl">
+            {format(new Date(), 'yyyy / MM / dd')} م
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+});
+
 enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',
@@ -997,11 +1581,1465 @@ const MONTHS_AR = [
   "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
 ];
 
+const CarSubscriptionModal = ({ 
+  isOpen, 
+  onClose, 
+  onSave,
+  editingRequest,
+  tenants = [],
+  apartments = []
+}: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  onSave: (data: any) => void,
+  editingRequest?: CleaningRequest | null,
+  tenants?: Tenant[],
+  apartments?: Apartment[]
+}) => {
+  const [formData, setFormData] = useState({
+    apartmentNumber: '', 
+    apartment: '',
+    car: '',
+    price: 300,
+    startDate: format(new Date(), 'yyyy-MM-dd'),
+    durationMonths: 1,
+    frequency: 'daily',
+    selectedDays: [0, 1, 2, 3, 4, 5, 6],
+    notes: '',
+    workerName: ''
+  });
+
+  useEffect(() => {
+    if (editingRequest && isOpen) {
+      setFormData({
+        apartmentNumber: editingRequest.apartmentNumber || '',
+        apartment: editingRequest.apartment || getApartmentNum(editingRequest) || '',
+        car: editingRequest.car || getCarName(editingRequest) || '',
+        price: editingRequest.price || 300,
+        startDate: format(safeToDate(editingRequest.subscriptionStartDate || editingRequest.date), 'yyyy-MM-dd'),
+        durationMonths: editingRequest.monthsCount || 1,
+        frequency: editingRequest.subscriptionFrequency || 'daily',
+        selectedDays: editingRequest.subscriptionSchedule || [0,1,2,3,4,5,6],
+        notes: editingRequest.notes || '',
+        workerName: editingRequest.workerName || ''
+      });
+    } else if (isOpen) {
+      // Reset for new entry
+      setFormData({
+        apartmentNumber: '',
+        apartment: '',
+        car: '',
+        price: 300,
+        startDate: format(new Date(), 'yyyy-MM-dd'),
+        durationMonths: 1,
+        frequency: 'daily',
+        selectedDays: [0, 1, 2, 3, 4, 5, 6],
+        notes: '',
+        workerName: ''
+      });
+    }
+  }, [editingRequest, isOpen]);
+
+  if (!isOpen) return null;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const startDate = new Date(formData.startDate);
+    const endDate = addMonths(startDate, formData.durationMonths);
+    
+    const data: any = {
+      serviceType: 'تنظيف سيارات',
+      apartmentNumber: formData.apartmentNumber,
+      apartment: formData.apartment,
+      car: formData.car,
+      price: Number(formData.price),
+      date: Timestamp.fromDate(startDate),
+      subscriptionStartDate: Timestamp.fromDate(startDate),
+      subscriptionEndDate: Timestamp.fromDate(endDate),
+      subscriptionSchedule: formData.selectedDays,
+      subscriptionFrequency: formData.frequency,
+      monthsCount: formData.durationMonths,
+      isSubscription: true,
+      workerName: formData.workerName,
+      notes: formData.notes || `السيارة: ${formData.car} | الشقة: ${formData.apartment}`,
+      updatedAt: serverTimestamp()
+    };
+
+    if (!editingRequest) {
+      data.createdAt = serverTimestamp();
+      data.status = 'completed';
+      data.paymentStatus = 'unpaid';
+    }
+    
+    onSave(data);
+    onClose();
+  };
+
+  const activeApartment = apartments.find(apt => apt.number === formData.apartment);
+  const activeTenant = activeApartment 
+    ? tenants.find(t => t.id === activeApartment.tenantId || t.apartmentId === activeApartment.id)
+    : tenants.find(t => {
+        const apt = apartments.find(a => a.id === t.apartmentId);
+        return apt && apt.number === formData.apartment;
+      });
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+      />
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl overflow-hidden font-cairo"
+      >
+        <form onSubmit={handleSubmit}>
+          <div className="p-8 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-primary/10 rounded-2xl flex items-center justify-center">
+                <CalendarCheck className="text-primary" size={24} />
+              </div>
+              <div>
+                <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">اشتراك غسيل شهري</h2>
+                <p className="text-sm font-bold text-gray-500">إضافة اشتراك جديد لفترة محددة</p>
+              </div>
+            </div>
+            <button type="button" onClick={onClose} className="p-3 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-2xl text-gray-400 transition-all">
+              <X size={24} />
+            </button>
+          </div>
+
+          <div className="p-8 space-y-5">
+            <div>
+              <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">رقم اللوحة</label>
+              <input 
+                required 
+                type="text" 
+                value={formData.apartmentNumber} 
+                onChange={e => setFormData({...formData, apartmentNumber: e.target.value})} 
+                className="w-full px-6 py-4 bg-gray-50 dark:bg-slate-800 rounded-2xl border-none focus:ring-2 focus:ring-primary transition-all font-bold dark:text-white text-center text-xl" 
+                placeholder="أ ب ج 1 2 3 4"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">رقم الشقة</label>
+                <input 
+                  required 
+                  type="text" 
+                  list="apartments-list"
+                  value={formData.apartment} 
+                  onChange={e => setFormData({...formData, apartment: e.target.value})} 
+                  className="w-full px-6 py-4 bg-gray-50 dark:bg-slate-800 rounded-2xl border-none focus:ring-2 focus:ring-primary transition-all font-bold dark:text-white" 
+                  placeholder="أدخل رقم الشقة"
+                />
+                <datalist id="apartments-list">
+                  {apartments.map(apt => (
+                    <option key={apt.id} value={apt.number}>
+                      {apt.buildingName} - شقة {apt.number}
+                    </option>
+                  ))}
+                </datalist>
+                {activeTenant && (
+                  <div className="mt-2 p-3 bg-indigo-50 dark:bg-indigo-950/40 rounded-xl border border-indigo-100 dark:border-indigo-900/30 text-right">
+                    <p className="text-[11px] font-black text-indigo-700 dark:text-indigo-300 flex items-center justify-start gap-1.5 leading-none">
+                      <UserIcon size={12} className="shrink-0" />
+                      المستأجر: {activeTenant.name}
+                    </p>
+                    <p className="text-[9px] font-bold text-gray-500 dark:text-gray-400 mt-1">
+                      الهاتف: {activeTenant.phone} • {activeTenant.company}
+                    </p>
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">نوع السيارة</label>
+                <input 
+                  required 
+                  type="text" 
+                  value={formData.car} 
+                  onChange={e => setFormData({...formData, car: e.target.value})} 
+                  className="w-full px-6 py-4 bg-gray-50 dark:bg-slate-800 rounded-2xl border-none focus:ring-2 focus:ring-primary transition-all font-bold dark:text-white" 
+                  placeholder="أدخل نوع وموديل السيارة"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">تاريخ البدء</label>
+                <input 
+                  required 
+                  type="date" 
+                  value={formData.startDate} 
+                  onChange={e => setFormData({...formData, startDate: e.target.value})} 
+                  className="w-full px-6 py-4 bg-gray-50 dark:bg-slate-800 rounded-2xl border-none focus:ring-2 focus:ring-primary transition-all font-bold dark:text-white" 
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">مبلغ الاشتراك</label>
+                <input 
+                  required 
+                  type="number" 
+                  value={formData.price} 
+                  onChange={e => setFormData({...formData, price: Number(e.target.value)})} 
+                  className="w-full px-6 py-4 bg-gray-50 dark:bg-slate-800 rounded-2xl border-none focus:ring-2 focus:ring-primary transition-all font-bold dark:text-white" 
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">مدة الاشتراك (بالأشهر)</label>
+              <div className="grid grid-cols-3 gap-2">
+                {[1, 2, 3].map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setFormData({...formData, durationMonths: m})}
+                    className={cn(
+                      "py-3 rounded-xl font-black text-sm transition-all",
+                      formData.durationMonths === m 
+                        ? "bg-primary text-white shadow-lg shadow-primary/20" 
+                        : "bg-gray-50 dark:bg-slate-800 text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700"
+                    )}
+                  >
+                    {m} {m === 1 ? 'شهر' : m === 2 ? 'شهرين' : 'أشهر'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">تكرار الغسيل</label>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {[
+                  { id: 'daily', label: 'يومياً' },
+                  { id: 'twice_a_week', label: 'يومين في الأسبوع' },
+                  { id: 'weekly', label: 'أيام محددة' }
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => {
+                      const days = f.id === 'daily' ? [0,1,2,3,4,5,6] : f.id === 'twice_a_week' ? [0,3] : [0,2,4];
+                      setFormData({...formData, frequency: f.id, selectedDays: days});
+                    }}
+                    className={cn(
+                      "py-3 rounded-xl font-black text-[11px] sm:text-xs transition-all",
+                      formData.frequency === f.id 
+                        ? "bg-primary text-white shadow-lg shadow-primary/20" 
+                        : "bg-gray-50 dark:bg-slate-800 text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700"
+                    )}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
+              {(formData.frequency === 'weekly' || formData.frequency === 'twice_a_week') && (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-7 gap-1">
+                    {['ج', 'س', 'ح', 'ن', 'ث', 'ر', 'خ'].map((day, idx) => {
+                      // map idx to JS day: 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+                      const dayMap = [5, 6, 0, 1, 2, 3, 4]; // Friday, Saturday, Sunday...
+                      const realDayIdx = dayMap[idx];
+                      const isSelected = formData.selectedDays.includes(realDayIdx);
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            let newDays;
+                            if (formData.frequency === 'twice_a_week') {
+                              if (isSelected) {
+                                newDays = formData.selectedDays.filter(d => d !== realDayIdx);
+                              } else {
+                                if (formData.selectedDays.length >= 2) {
+                                  newDays = [formData.selectedDays[formData.selectedDays.length - 1], realDayIdx];
+                                } else {
+                                  newDays = [...formData.selectedDays, realDayIdx];
+                                }
+                              }
+                            } else {
+                              newDays = isSelected 
+                                ? formData.selectedDays.filter(d => d !== realDayIdx)
+                                : [...formData.selectedDays, realDayIdx];
+                            }
+                            setFormData({...formData, selectedDays: newDays});
+                          }}
+                          className={cn(
+                            "h-10 rounded-lg font-bold text-[10px] transition-all",
+                            isSelected 
+                              ? "bg-primary text-white" 
+                              : "bg-gray-50 dark:bg-slate-800 text-gray-400 hover:bg-gray-100"
+                          )}
+                        >
+                          {day}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {formData.frequency === 'twice_a_week' && formData.selectedDays.length !== 2 && (
+                    <p className="text-[10px] font-bold text-amber-600 dark:text-amber-400 text-right">
+                      * يرجى تحديد يومين في الأسبوع (المحدد حالياً: {formData.selectedDays.length})
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">العامل المسؤول</label>
+              <input 
+                type="text" 
+                value={formData.workerName} 
+                onChange={e => setFormData({...formData, workerName: e.target.value})} 
+                className="w-full px-6 py-4 bg-gray-50 dark:bg-slate-800 rounded-2xl border-none focus:ring-2 focus:ring-primary transition-all font-bold dark:text-white" 
+                placeholder="اسم العامل"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">ملاحظات</label>
+              <textarea 
+                value={formData.notes} 
+                onChange={e => setFormData({...formData, notes: e.target.value})} 
+                className="w-full px-6 py-4 bg-gray-50 dark:bg-slate-800 rounded-2xl border-none focus:ring-2 focus:ring-primary transition-all font-bold dark:text-white h-24" 
+              />
+            </div>
+          </div>
+
+          <div className="p-8 bg-gray-50 dark:bg-slate-800/30 border-t border-gray-100 dark:border-slate-800 flex gap-4">
+            <button 
+              type="button" 
+              onClick={onClose} 
+              className="flex-1 py-4 bg-white dark:bg-slate-800 text-gray-500 rounded-2xl font-black border border-gray-200 dark:border-slate-700"
+            >
+              إلغاء
+            </button>
+            <button 
+              type="submit" 
+              className="flex-2 py-4 bg-primary text-white rounded-2xl font-black shadow-xl shadow-primary/20"
+            >
+              تفعيل الاشتراك
+            </button>
+          </div>
+        </form>
+      </motion.div>
+    </div>
+  );
+};
+
+const SubscriptionDetailsModal = ({ 
+  isOpen, 
+  onClose, 
+  subscription 
+}: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  subscription: CleaningRequest | null 
+}) => {
+  if (!isOpen || !subscription) return null;
+
+  const startDate = safeToDate(subscription.subscriptionStartDate || subscription.date);
+  const endDate = safeToDate(subscription.subscriptionEndDate);
+  const schedule = subscription.subscriptionSchedule || [0,1,2,3,4,5,6];
+  const completed = subscription.completedDates || [];
+
+  // Generate all scheduled dates
+  const allDates: Date[] = [];
+  let current = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const final = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+
+  while (current <= final) {
+    if (schedule.includes(current.getDay())) {
+      allDates.push(new Date(current));
+    }
+    current.setDate(current.getDate() + 1);
+  }
+
+  // Group by month
+  const groupedByMonth: Record<string, Date[]> = {};
+  allDates.forEach(date => {
+    const monthKey = format(date, 'MMMM yyyy', { locale: ar });
+    if (!groupedByMonth[monthKey]) groupedByMonth[monthKey] = [];
+    groupedByMonth[monthKey].push(date);
+  });
+
+  return (
+    <div className="fixed inset-0 z-[160] flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+        className="absolute inset-0 bg-black/60 backdrop-blur-md"
+      />
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl overflow-hidden font-cairo max-h-[85vh] flex flex-col"
+      >
+        <div className="p-8 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between bg-gray-50/50 dark:bg-slate-800/50">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-primary/10 rounded-2xl flex items-center justify-center">
+              <History className="text-primary" size={24} />
+            </div>
+            <div>
+              <h2 className="text-xl font-black text-gray-900 dark:text-white tracking-tight">تفاصيل جدول الاشتراك</h2>
+              <p className="text-xs font-bold text-gray-500">لوحة: {subscription.apartmentNumber} · {subscription.monthsCount} أشهر</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-3 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-2xl text-gray-400 transition-all">
+            <X size={24} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-8 space-y-8">
+          {Object.entries(groupedByMonth).map(([month, dates]) => (
+            <div key={month} className="space-y-4">
+              <h3 className="text-sm font-black text-primary flex items-center gap-2">
+                <div className="w-1.5 h-4 bg-primary rounded-full" />
+                {month}
+              </h3>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {dates.map((date, idx) => {
+                  const dateStr = format(date, 'yyyy-MM-dd');
+                  const isDone = completed.includes(dateStr);
+                  const isPast = isBefore(date, startOfDay(new Date()));
+                  
+                  return (
+                    <div 
+                      key={idx}
+                      className={cn(
+                        "p-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all",
+                        isDone 
+                          ? "bg-emerald-50 border-emerald-100 text-emerald-700" 
+                          : isPast 
+                            ? "bg-gray-50 border-gray-100 text-gray-400"
+                            : "bg-white dark:bg-slate-800 border-gray-100 dark:border-slate-700 text-gray-600 dark:text-slate-300"
+                      )}
+                    >
+                      <span className="text-[10px] font-black opacity-60">
+                        {format(date, 'EEEE', { locale: ar })}
+                      </span>
+                      <span className="text-sm font-black">
+                        {format(date, 'dd MMMM', { locale: ar })}
+                      </span>
+                      <div className={cn(
+                        "mt-1 px-2 py-0.5 rounded-full text-[8px] font-black uppercase",
+                        isDone ? "bg-emerald-200 text-emerald-800" : "bg-gray-200 text-gray-600"
+                      )}>
+                        {isDone ? '✓ تم' : 'قيد الانتظار'}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+const GameRoomBookingModal = ({ 
+  isOpen, 
+  onClose, 
+  onSave,
+  editingBooking
+}: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  onSave: (data: any) => void,
+  editingBooking?: Booking | null
+}) => {
+  const [formData, setFormData] = useState({
+    customerName: '',
+    customerPhone: '',
+    buildingName: '',
+    apartmentNumber: '',
+    date: format(new Date(), 'yyyy-MM-dd'),
+    time: '10:00'
+  });
+
+  useEffect(() => {
+    if (editingBooking && isOpen) {
+      setFormData({
+        customerName: editingBooking.customerName || '',
+        customerPhone: editingBooking.customerPhone || '',
+        buildingName: editingBooking.buildingName || '',
+        apartmentNumber: editingBooking.apartmentNumber || '',
+        date: format(safeToDate(editingBooking.date), 'yyyy-MM-dd'),
+        time: editingBooking.time || '10:00'
+      });
+    } else if (isOpen) {
+      setFormData({
+        customerName: '',
+        customerPhone: '',
+        buildingName: '',
+        apartmentNumber: '',
+        date: format(new Date(), 'yyyy-MM-dd'),
+        time: '10:00'
+      });
+    }
+  }, [editingBooking, isOpen]);
+
+  if (!isOpen) return null;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const data: any = {
+      ...formData,
+      serviceType: 'حجز غرفة الألعاب',
+      date: Timestamp.fromDate(new Date(formData.date)),
+      updatedAt: serverTimestamp()
+    };
+
+    if (!editingBooking) {
+      data.createdAt = serverTimestamp();
+      data.status = 'confirmed';
+      data.language = 'ar';
+    }
+    
+    onSave(data);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+      />
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl overflow-hidden font-cairo"
+      >
+        <form onSubmit={handleSubmit}>
+          <div className="p-8 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-primary/10 rounded-2xl flex items-center justify-center">
+                <Gamepad2 className="text-primary" size={24} />
+              </div>
+              <div>
+                <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">حجز غرفة الألعاب</h2>
+                <p className="text-sm font-bold text-gray-500">{editingBooking ? 'تعديل حجز' : 'إضافة حجز جديد'}</p>
+              </div>
+            </div>
+            <button type="button" onClick={onClose} className="p-3 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-2xl text-gray-400 transition-all">
+              <X size={24} />
+            </button>
+          </div>
+
+          <div className="p-8 space-y-5">
+            <div>
+              <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">اسم العميل</label>
+              <input 
+                required 
+                type="text" 
+                value={formData.customerName} 
+                onChange={e => setFormData({...formData, customerName: e.target.value})} 
+                className="w-full px-6 py-4 bg-gray-50 dark:bg-slate-800 rounded-2xl border-none focus:ring-2 focus:ring-primary transition-all font-bold dark:text-white" 
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">رقم الجوال</label>
+              <input 
+                required 
+                type="tel" 
+                value={formData.customerPhone} 
+                onChange={e => setFormData({...formData, customerPhone: e.target.value})} 
+                className="w-full px-6 py-4 bg-gray-50 dark:bg-slate-800 rounded-2xl border-none focus:ring-2 focus:ring-primary transition-all font-bold dark:text-white" 
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">المبنى</label>
+                <input 
+                  type="text" 
+                  value={formData.buildingName} 
+                  onChange={e => setFormData({...formData, buildingName: e.target.value})} 
+                  className="w-full px-6 py-4 bg-gray-50 dark:bg-slate-800 rounded-2xl border-none focus:ring-2 focus:ring-primary transition-all font-bold dark:text-white" 
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">رقم الشقة</label>
+                <input 
+                  type="text" 
+                  value={formData.apartmentNumber} 
+                  onChange={e => setFormData({...formData, apartmentNumber: e.target.value})} 
+                  className="w-full px-6 py-4 bg-gray-50 dark:bg-slate-800 rounded-2xl border-none focus:ring-2 focus:ring-primary transition-all font-bold dark:text-white" 
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">التاريخ</label>
+                <input 
+                  required 
+                  type="date" 
+                  value={formData.date} 
+                  onChange={e => setFormData({...formData, date: e.target.value})} 
+                  className="w-full px-6 py-4 bg-gray-50 dark:bg-slate-800 rounded-2xl border-none focus:ring-2 focus:ring-primary transition-all font-bold dark:text-white" 
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">الوقت</label>
+                <input 
+                  required 
+                  type="time" 
+                  value={formData.time} 
+                  onChange={e => setFormData({...formData, time: e.target.value})} 
+                  className="w-full px-6 py-4 bg-gray-50 dark:bg-slate-800 rounded-2xl border-none focus:ring-2 focus:ring-primary transition-all font-bold dark:text-white" 
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="p-8 bg-gray-50 dark:bg-slate-800/30 border-t border-gray-100 dark:border-slate-800 flex gap-4">
+            <button 
+              type="button" 
+              onClick={onClose} 
+              className="flex-1 py-4 bg-white dark:bg-slate-800 text-gray-500 rounded-2xl font-black border border-gray-200 dark:border-slate-700"
+            >
+              إلغاء
+            </button>
+            <button 
+              type="submit" 
+              className="flex-2 py-4 bg-primary text-white rounded-2xl font-black shadow-xl shadow-primary/20"
+            >
+              حفظ الحجز
+            </button>
+          </div>
+        </form>
+      </motion.div>
+    </div>
+  );
+};
+
+const GroupHistoryModal = ({ 
+  isOpen, 
+  onClose, 
+  requests,
+  onUpdateStatus,
+  onEdit,
+  onDelete
+}: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  requests: CleaningRequest[] | null,
+  onUpdateStatus: (id: string, field: 'status' | 'paymentStatus', value: string) => void,
+  onEdit: (req: CleaningRequest) => void,
+  onDelete: (id: string) => void
+}) => {
+  if (!isOpen || !requests) return null;
+
+  return (
+    <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+      />
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        className="relative w-full max-w-4xl bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl overflow-hidden font-cairo max-h-[80vh] flex flex-col"
+      >
+        <div className="p-8 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-primary/10 rounded-2xl flex items-center justify-center">
+              <History className="text-primary" size={24} />
+            </div>
+            <div>
+              <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">تفاصيل الطلبات المجمعة</h2>
+              <p className="text-sm font-bold text-gray-500">شقة {requests[0]?.apartmentNumber} - {requests[0]?.serviceType}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-3 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-2xl text-gray-400 transition-all">
+            <X size={24} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-8">
+          <table className="w-full text-right">
+            <thead>
+              <tr className="border-b border-gray-100 dark:border-slate-800 text-xs font-black text-gray-400 uppercase tracking-widest">
+                <th className="py-4 px-2">التاريخ</th>
+                <th className="py-4 px-2">المبلغ</th>
+                <th className="py-4 px-2">الحالة</th>
+                <th className="py-4 px-2">الدفع</th>
+                <th className="py-4 px-2">إجراءات</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50 dark:divide-slate-800">
+              {requests.map((req) => (
+                <tr key={req.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/50 transition-all">
+                  <td className="py-4 px-2">
+                    <span className="text-xs font-bold text-gray-600 dark:text-slate-300">
+                      {format(safeToDate(req.date), 'yyyy/MM/dd HH:mm')}
+                    </span>
+                  </td>
+                  <td className="py-4 px-2">
+                    <span className="text-sm font-black text-primary">{req.price} ريال</span>
+                  </td>
+                  <td className="py-4 px-2">
+                    <button 
+                      onClick={() => onUpdateStatus(req.id, 'status', req.status === 'completed' ? 'pending' : 'completed')}
+                      className={cn(
+                        "px-2 py-1 rounded-lg text-[10px] font-black transition-all",
+                        req.status === 'completed' ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"
+                      )}
+                    >
+                      {req.status === 'completed' ? 'منفذة' : 'قيد الانتظار'}
+                    </button>
+                  </td>
+                  <td className="py-4 px-2">
+                    <button 
+                      onClick={() => onUpdateStatus(req.id, 'paymentStatus', req.paymentStatus === 'paid' ? 'unpaid' : 'paid')}
+                      className={cn(
+                        "px-2 py-1 rounded-lg text-[10px] font-black transition-all",
+                        req.paymentStatus === 'paid' ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600"
+                      )}
+                    >
+                      {req.paymentStatus === 'paid' ? 'مدفوع' : 'غير مدفوع'}
+                    </button>
+                  </td>
+                  <td className="py-4 px-2">
+                    <div className="flex gap-2">
+                      <button onClick={() => onEdit(req)} className="text-gray-400 hover:text-primary"><Pencil size={14} /></button>
+                      <button onClick={() => onDelete(req.id)} className="text-gray-400 hover:text-rose-500"><Trash2 size={14} /></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+const WhatsAppMessageModal = ({ 
+  isOpen, 
+  onClose, 
+  tenant, 
+  apartment, 
+  cleaningRequests 
+}: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  tenant: Tenant | null, 
+  apartment: Apartment | null,
+  cleaningRequests: CleaningRequest[] 
+}) => {
+  if (!isOpen || !tenant) return null;
+
+  const apartmentCleaningCount = cleaningRequests.filter(r => 
+    r.apartmentNumber === (apartment?.number || tenant.id) && // Assuming apartmentNumber if available
+    r.serviceType === 'تنظيف شقة' &&
+    r.paymentStatus === 'unpaid'
+  ).length;
+
+  const carCleaningCount = cleaningRequests.filter(r => 
+    r.apartmentNumber === (apartment?.number || tenant.id) && 
+    r.serviceType === 'تنظيف سيارة' &&
+    r.paymentStatus === 'unpaid'
+  ).length;
+
+  const nextPaymentDateStr = tenant.nextPaymentDate ? format(safeToDate(tenant.nextPaymentDate), 'PPP', { locale: ar }) : 'غير محدد';
+
+  const templates = [
+    {
+      id: 'welcome_rent',
+      title: 'ترحيب وتذكير بالإيجار',
+      icon: <Calendar className="text-blue-500" size={20} />,
+      message: `مرحباً ${tenant.name}، يسعدنا تواجدكم معنا. نود تذكيركم بموعد استحقاق الإيجار القادم بتاريخ ${nextPaymentDateStr}. شكراً لتفهمكم.`,
+      color: 'blue'
+    },
+    {
+      id: 'apartment_cleaning',
+      title: 'تذكير بدفعة تنظيف الشقة',
+      icon: <Sparkles className="text-emerald-500" size={20} />,
+      message: `مرحباً ${tenant.name}، نود تذكيركم بوجود عدد (${apartmentCleaningCount}) طلبات تنظيف شقة لم يتم سدادها بعد. يرجى التكرم بالسداد في أقرب وقت. شكراً لكم.`,
+      color: 'emerald',
+      disabled: apartmentCleaningCount === 0
+    },
+    {
+      id: 'car_cleaning',
+      title: 'تذكير بدفعة تنظيف السيارة',
+      icon: <Car className="text-orange-500" size={20} />,
+      message: `مرحباً ${tenant.name}، نود تذكيركم بوجود عدد (${carCleaningCount}) طلبات تنظيف سيارة لم يتم سدادها بعد. يرجى التكرم بالسداد في أقرب وقت. شكراً لكم.`,
+      color: 'orange',
+      disabled: carCleaningCount === 0
+    }
+  ];
+
+  const handleSend = (message: string) => {
+    const phone = tenant.phone.replace(/\s+/g, '');
+    const encodedMessage = encodeURIComponent(message);
+    window.open(`https://wa.me/${phone}?text=${encodedMessage}`, '_blank');
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+      />
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl overflow-hidden font-cairo"
+      >
+        <div className="p-8 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-green-500/10 rounded-2xl flex items-center justify-center">
+              <MessageSquare className="text-green-600" size={24} />
+            </div>
+            <div>
+              <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">إرسال رسالة واتساب</h2>
+              <p className="text-sm font-bold text-gray-500">اختر نموذج الرسالة المراد إرسالها لـ {tenant.name}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-3 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-2xl text-gray-400 transition-all">
+            <X size={24} />
+          </button>
+        </div>
+
+        <div className="p-8 space-y-4">
+          {templates.map((template) => (
+            <motion.button
+              key={template.id}
+              disabled={template.disabled}
+              whileHover={template.disabled ? {} : { scale: 1.02, x: -5 }}
+              whileTap={template.disabled ? {} : { scale: 0.98 }}
+              onClick={() => handleSend(template.message)}
+              className={cn(
+                "w-full p-6 rounded-3xl border text-right transition-all flex items-center gap-4 group text-right",
+                template.disabled 
+                  ? "bg-gray-50 dark:bg-slate-800/50 border-gray-100 dark:border-slate-800 opacity-50 cursor-not-allowed" 
+                  : `bg-white dark:bg-slate-900 border-gray-100 dark:border-slate-800 hover:border-green-500/30 hover:shadow-xl shadow-gray-200/50`
+              )}
+            >
+              <div className={cn(
+                "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0",
+                template.disabled ? "bg-gray-200 dark:bg-slate-700" : `bg-gray-50 dark:bg-slate-800`
+              )}>
+                {template.icon}
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="font-black text-gray-900 dark:text-white">{template.title}</h3>
+                  {!template.disabled && <Send size={16} className={`text-green-500 opacity-0 group-hover:opacity-100 transition-all`} />}
+                </div>
+                <p className="text-xs text-gray-500 dark:text-slate-400 leading-relaxed line-clamp-2">
+                  {template.message}
+                </p>
+              </div>
+            </motion.button>
+          ))}
+        </div>
+
+        <div className="p-8 bg-gray-50 dark:bg-slate-800/30 border-t border-gray-100 dark:border-slate-800 text-center">
+          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest leading-relaxed">
+            سيتم فتح تطبيق الواتساب مباشرة مع الرسالة النصية المختارة<br />
+            يرجى التأكد من أن رقم الهاتف ({tenant.phone}) صحيح ومسجل عليه واتساب
+          </p>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+const ApartmentCodesModal = ({
+  isOpen,
+  onClose,
+  apartments,
+  tenants
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  apartments: Apartment[];
+  tenants: Tenant[];
+}) => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [buildingFilter, setBuildingFilter] = useState('all');
+  const [localCodes, setLocalCodes] = useState<Record<string, string>>({});
+  const [savingId, setSavingId] = useState<string | null>(null);
+
+  // Initialize local codes when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      const codes: Record<string, string> = {};
+      apartments.forEach(apt => {
+        codes[apt.id] = apt.secretCode || '';
+      });
+      setLocalCodes(codes);
+    }
+  }, [isOpen, apartments]);
+
+  if (!isOpen) return null;
+
+  const handleCodeChange = (aptId: string, val: string) => {
+    setLocalCodes(prev => ({ ...prev, [aptId]: val }));
+  };
+
+  const handleSaveCode = async (aptId: string) => {
+    setSavingId(aptId);
+    try {
+      const codeValue = localCodes[aptId]?.trim() || '';
+      await updateDoc(doc(db, 'apartments', aptId), {
+        secretCode: codeValue,
+        updatedAt: serverTimestamp()
+      });
+      toast.success('تم حفظ الرمز السري بنجاح');
+    } catch (error) {
+      console.error(error);
+      toast.error('حدث خطأ أثناء حفظ الرمز السري');
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const handleGenerateRandom = (aptId: string) => {
+    // Generate a beautiful 4-digit code
+    const pin = Math.floor(1000 + Math.random() * 9000).toString();
+    handleCodeChange(aptId, pin);
+  };
+
+  const handleBulkGenerate = async () => {
+    const emptyOrMissingCount = apartments.filter(a => !a.secretCode).length;
+    if (emptyOrMissingCount === 0) {
+      toast.info('جميع الشقق تمتلك رموزاً سرية بالفعل');
+      return;
+    }
+
+    if (window.confirm(`هل تريد إنشاء رموز سرية عشوائية تلقائياً لـ ${emptyOrMissingCount} شقة لا تمتلك رمزاً؟`)) {
+      toast.loading('جاري توليد الرموز السرية...');
+      let successCount = 0;
+      try {
+        for (const apt of apartments) {
+          if (!apt.secretCode) {
+            const pin = Math.floor(1000 + Math.random() * 9000).toString();
+            await updateDoc(doc(db, 'apartments', apt.id), {
+              secretCode: pin,
+              updatedAt: serverTimestamp()
+            });
+            successCount++;
+          }
+        }
+        toast.dismiss();
+        toast.success(`تم بنجاح توليد ${successCount} رمز سري عشوائي!`);
+      } catch (error) {
+        toast.dismiss();
+        console.error(error);
+        toast.error('حدث خطأ أثناء التوليد التلقائي للرموز السريّة');
+      }
+    }
+  };
+
+  const filteredApartments = apartments.filter(apt => {
+    const b = PROPERTY_BUILDINGS.find(pb => pb.id === apt.buildingId);
+    const text = searchTerm.toLowerCase();
+    const matchesSearch = apt.number.toLowerCase().includes(text) || 
+                         (b?.name || '').toLowerCase().includes(text);
+    const matchesBuilding = buildingFilter === 'all' || apt.buildingId === buildingFilter;
+    return matchesSearch && matchesBuilding;
+  }).sort((a, b) => {
+    const b1 = PROPERTY_BUILDINGS.findIndex(pb => pb.id === a.buildingId);
+    const b2 = PROPERTY_BUILDINGS.findIndex(pb => pb.id === b.buildingId);
+    if (b1 !== b2) return b1 - b2;
+    return a.number.localeCompare(b.number);
+  });
+
+  return (
+    <AnimatePresence>
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={onClose}
+          className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+        />
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.95, y: 20 }}
+          className="relative w-full max-w-4xl bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl overflow-hidden border border-white/20 dark:border-slate-800"
+        >
+          {/* Header */}
+          <div className="p-8 border-b dark:border-slate-800 flex items-center justify-between bg-primary/5 dark:bg-primary/10 animate-fade-in">
+            <div className="flex items-center gap-4">
+              <div className="bg-primary p-3 rounded-2xl text-white shadow-lg shadow-primary/20 dark:shadow-none">
+                <Key size={24} />
+              </div>
+              <div className="text-right">
+                <h2 className="text-2xl font-black text-gray-900 dark:text-white">إدارة الرموز السرية للشقق</h2>
+                <p className="text-sm font-bold text-gray-500 dark:text-slate-400 mt-1">تخصيص وتوليد رموز المرور السرية لجميع الوحدات السكنية</p>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-3">
+              <button 
+                onClick={handleBulkGenerate}
+                className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-b from-amber-500 to-amber-600 border-t border-t-white/10 border-b-[3px] border-b-amber-800 text-white hover:opacity-90 rounded-xl transition-all font-bold text-xs shadow-sm cursor-pointer"
+              >
+                <Sparkles size={16} />
+                <span>توليد تلقائي للجميع</span>
+              </button>
+              
+              <button 
+                onClick={onClose}
+                className="p-2 hover:bg-neutral-100 dark:hover:bg-slate-800 rounded-xl transition-colors text-gray-400 cursor-pointer"
+              >
+                <X size={24} />
+              </button>
+            </div>
+          </div>
+
+          <div className="p-8 max-h-[70vh] overflow-y-auto custom-scrollbar">
+            {/* Controls */}
+            <div className="flex flex-col md:flex-row md:items-center gap-4 mb-6 bg-slate-50 dark:bg-slate-900/40 p-4 rounded-2xl border border-slate-100 dark:border-slate-800/80">
+              <div className="flex-1 relative">
+                <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                <input
+                  type="text"
+                  placeholder="بحث برقم الشقة أو اسم المبنى..."
+                  className="w-full pr-12 pl-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-250 dark:border-slate-700/80 rounded-xl text-sm font-bold focus:ring-2 focus:ring-primary outline-none"
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                />
+              </div>
+
+              <select 
+                value={buildingFilter}
+                onChange={e => setBuildingFilter(e.target.value)}
+                className="px-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-250 dark:border-slate-700/80 rounded-xl text-sm font-black focus:ring-2 focus:ring-primary outline-none cursor-pointer"
+              >
+                <option value="all">كل المباني</option>
+                {PROPERTY_BUILDINGS.map(pb => (
+                  <option key={pb.id} value={pb.id}>{pb.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* List */}
+            <div className="space-y-3">
+              {filteredApartments.length === 0 ? (
+                <div className="text-center py-12 text-slate-400 dark:text-slate-500 font-bold">
+                  لا توجد وحدات مطابقة للبحث
+                </div>
+              ) : (
+                <div className="border border-slate-100 dark:border-slate-800 rounded-2xl overflow-hidden divide-y divide-slate-100 dark:divide-slate-800 shadow-sm">
+                  {filteredApartments.map(apt => {
+                    const b = PROPERTY_BUILDINGS.find(pb => pb.id === apt.buildingId);
+                    const tenant = (apt.tenantId ? tenants.find(t => t.id === apt.tenantId) : null) || tenants.find(t => t.apartmentId === apt.id);
+                    const code = localCodes[apt.id] || '';
+                    const isSaving = savingId === apt.id;
+
+                    return (
+                      <div key={apt.id} className="flex flex-col md:flex-row md:items-center justify-between p-4 bg-white dark:bg-slate-900/60 hover:bg-slate-50/50 dark:hover:bg-slate-850/50 transition-colors gap-4">
+                        <div className="flex items-center gap-4">
+                          <div className="w-11 h-11 bg-primary/10 dark:bg-primary/5 text-primary rounded-xl flex items-center justify-center font-bold text-sm border border-primary/10">
+                            {apt.number}
+                          </div>
+                          <div className="text-right">
+                            <p className="font-bold text-slate-800 dark:text-slate-250 text-sm">شقة {apt.number} <span className="text-xs text-slate-400 font-medium">({b?.name || 'مبنى'})</span></p>
+                            <p className="text-xs text-slate-400 font-medium mt-0.5">
+                              {tenant ? `المستأجر: ${tenant.company || tenant.name}` : 'شاغرة حالياً'}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <div className="relative">
+                            <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400">
+                              <Lock size={14} />
+                            </span>
+                            <input 
+                              type="text"
+                              value={code}
+                              maxLength={12}
+                              placeholder="الرمز السري"
+                              onChange={e => handleCodeChange(apt.id, e.target.value)}
+                              className="w-44 pr-10 pl-4 py-2.5 bg-slate-55 dark:bg-slate-800 border border-slate-250 dark:border-slate-700/80 rounded-xl text-center font-mono font-bold text-sm focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                          </div>
+
+                          <motion.button 
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={() => handleGenerateRandom(apt.id)}
+                            className="p-2.5 text-amber-500 bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 rounded-xl cursor-pointer"
+                            title="توليد رمز تلقائي"
+                          >
+                            <Sparkles size={16} />
+                          </motion.button>
+
+                          <motion.button 
+                            whileHover={{ scale: 1.03 }}
+                            whileTap={{ scale: 0.97 }}
+                            disabled={isSaving}
+                            onClick={() => handleSaveCode(apt.id)}
+                            className={cn(
+                              "px-4 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer border-b-[3px]",
+                              isSaving 
+                                ? "bg-slate-300 text-slate-500" 
+                                : "bg-gradient-to-b from-primary to-primary-dark border-b-primary-dark text-white shadow-sm hover:opacity-95"
+                            )}
+                          >
+                            {isSaving ? '...' : 'حفظ'}
+                          </motion.button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    </AnimatePresence>
+  );
+};
+
+const CarSubscriptionPaymentsModal = ({
+  isOpen,
+  onClose,
+  subscription
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  subscription: CleaningRequest | null;
+}) => {
+  const [payments, setPayments] = useState<{
+    monthKey: string;
+    monthName: string;
+    isPaid: boolean;
+    amount: number;
+    paidDate?: string;
+  }[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  // Load existing payments or generate default months based on subscription period
+  useEffect(() => {
+    if (!subscription || !isOpen) return;
+
+    if (subscription.subscriptionPayments !== undefined && subscription.subscriptionPayments !== null) {
+      setPayments([...subscription.subscriptionPayments]);
+    } else {
+      // Generate subscription months for the first time
+      const start = safeToDate(subscription.subscriptionStartDate || subscription.date);
+      const end = safeToDate(subscription.subscriptionEndDate);
+      const monthsList: { monthKey: string; monthName: string; defaultAmount: number }[] = [];
+      
+      let current = startOfMonth(start);
+      const targetEnd = startOfMonth(end);
+      
+      // Calculate typical monthly amount: total price / monthsCount
+      const perMonthAmount = Math.round(subscription.price / (subscription.monthsCount || 1));
+
+      while (current <= targetEnd) {
+        const monthKey = format(current, 'yyyy-MM');
+        const monthName = format(current, 'MMMM yyyy', { locale: ar });
+        monthsList.push({ monthKey, monthName, defaultAmount: perMonthAmount });
+        current = addMonths(current, 1);
+      }
+
+      const merged = monthsList.map(item => ({
+        monthKey: item.monthKey,
+        monthName: item.monthName,
+        isPaid: false,
+        amount: item.defaultAmount,
+        paidDate: ''
+      }));
+
+      setPayments(merged);
+    }
+  }, [subscription, isOpen]);
+
+  if (!isOpen || !subscription) return null;
+
+  const handleTogglePaid = (index: number) => {
+    setPayments(prev => {
+      const updated = [...prev];
+      const target = updated[index];
+      const newIsPaid = !target.isPaid;
+      updated[index] = {
+        ...target,
+        isPaid: newIsPaid,
+        paidDate: newIsPaid ? format(new Date(), 'yyyy-MM-dd') : ''
+      };
+      return updated;
+    });
+  };
+
+  const handleAmountChange = (index: number, val: number) => {
+    setPayments(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], amount: val };
+      return updated;
+    });
+  };
+
+  const handleDateChange = (index: number, dateStr: string) => {
+    setPayments(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], paidDate: dateStr };
+      return updated;
+    });
+  };
+
+  const handleDeleteMonth = (index: number) => {
+    setPayments(prev => prev.filter((_, i) => i !== index));
+    toast.success('تم حذف الشهر من القائمة');
+  };
+
+  const handleAddCustomMonth = () => {
+    // Generate next month after the last element or next month from today
+    let baseDate = new Date();
+    if (payments.length > 0) {
+      const lastKey = payments[payments.length - 1].monthKey;
+      const [y, m] = lastKey.split('-').map(Number);
+      baseDate = new Date(y, m, 1); // JS months are 0-indexed, so passing index `m` automatically gives next month!
+    }
+    const monthKey = format(baseDate, 'yyyy-MM');
+    const monthName = format(baseDate, 'MMMM yyyy', { locale: ar });
+    const perMonthAmount = Math.round(subscription.price / (subscription.monthsCount || 1));
+
+    // Check if it already exists
+    if (payments.some(p => p.monthKey === monthKey)) {
+      toast.info('هذا الشهر متواجد بالفعل في القائمة');
+      return;
+    }
+
+    setPayments(prev => [
+      ...prev,
+      {
+        monthKey,
+        monthName,
+        isPaid: false,
+        amount: perMonthAmount,
+        paidDate: ''
+      }
+    ]);
+    toast.success(`تمت إضافة ${monthName} للقائمة`);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const cleanedPayments = payments.map(p => ({
+        monthKey: p.monthKey,
+        monthName: p.monthName,
+        isPaid: p.isPaid,
+        amount: Number(p.amount) || 0,
+        paidDate: p.paidDate || ''
+      }));
+
+      // Calculate total paid so far
+      const isTotallyPaid = cleanedPayments.every(p => p.isPaid);
+
+      // In Firestore, save payments and also update general paymentStatus
+      await updateDoc(doc(db, 'requests', subscription.id), {
+        subscriptionPayments: cleanedPayments,
+        paymentStatus: isTotallyPaid ? 'paid' : 'unpaid',
+        updatedAt: serverTimestamp()
+      });
+
+      toast.success('تمت حفظ معلومات الدفع والشهور بنجاح');
+      onClose();
+    } catch (error) {
+      console.error(error);
+      toast.error('حدث خطأ أثناء حفظ معلومات الدفع');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <AnimatePresence>
+      <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={onClose}
+          className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+        />
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.95, y: 20 }}
+          className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl overflow-hidden font-cairo border border-slate-100 dark:border-slate-800"
+        >
+          {/* Header */}
+          <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-primary/5 dark:bg-primary/10">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-emerald-600 rounded-2xl text-white shadow-lg shadow-emerald-500/20 dark:shadow-none">
+                <CreditCard size={22} />
+              </div>
+              <div className="text-right">
+                <h3 className="text-lg font-black text-gray-900 dark:text-white">سجل الدفعيات والشهور</h3>
+                <p className="text-xs text-slate-500 mt-0.5 font-bold">
+                  شقة {subscription.apartmentNumber || subscription.apartment} • لوحة {subscription.apartmentNumber}
+                </p>
+              </div>
+            </div>
+            
+            <button 
+              onClick={onClose}
+              className="p-2 hover:bg-neutral-100 dark:hover:bg-slate-800 rounded-xl transition-colors text-gray-400 cursor-pointer"
+            >
+              <X size={20} />
+            </button>
+          </div>
+
+          {/* Body */}
+          <div className="p-6 max-h-[60vh] overflow-y-auto custom-scrollbar space-y-4">
+            <div className="text-right bg-slate-50 dark:bg-slate-950 p-3.5 rounded-xl border border-dashed border-slate-250 dark:border-slate-805 text-xs text-slate-500 space-y-1">
+              <p>🚗 السيارة: <span className="text-slate-800 dark:text-slate-200 font-extrabold">{subscription.car || 'غير محددة'}</span></p>
+              <p>📅 مدة الاشتراك: <span className="text-slate-800 dark:text-slate-200 font-extrabold">{format(safeToDate(subscription.subscriptionStartDate || subscription.date), 'dd/MM/yyyy')} إلى {format(safeToDate(subscription.subscriptionEndDate), 'dd/MM/yyyy')}</span></p>
+              <p>💰 القيمة الكلية: <span className="text-emerald-600 dark:text-emerald-400 font-black">{subscription.price} ريال</span></p>
+            </div>
+
+            <div className="flex justify-between items-center px-1">
+              <span className="text-xs font-black text-gray-400">قائمة الشهور المستحقة والمدفوعة</span>
+              
+              <button
+                type="button"
+                onClick={handleAddCustomMonth}
+                className="text-[11px] font-black text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 flex items-center gap-1 cursor-pointer bg-emerald-500/5 hover:bg-emerald-500/10 px-2.5 py-1 rounded-lg"
+              >
+                <Plus size={12} />
+                إضافة شهر إضافي
+              </button>
+            </div>
+
+            <div className="space-y-2.5">
+              {payments.map((p, idx) => (
+                <div 
+                  key={p.monthKey}
+                  className={cn(
+                    "flex flex-col sm:flex-row sm:items-center justify-between p-3.5 rounded-2xl border transition-all gap-3 text-right",
+                    p.isPaid 
+                      ? "bg-emerald-500/5 border-emerald-500/20 dark:bg-emerald-500/10" 
+                      : "bg-slate-50/50 border-slate-100 dark:bg-slate-900/30 dark:border-slate-800"
+                  )}
+                >
+                  <div className="flex items-center gap-3 justify-between sm:justify-start">
+                    <button
+                      type="button"
+                      onClick={() => handleTogglePaid(idx)}
+                      className={cn(
+                        "px-3 py-1.5 rounded-xl text-[10px] font-black transition-all cursor-pointer flex items-center gap-1.5 border-b-[3px]",
+                        p.isPaid
+                          ? "bg-gradient-to-b from-emerald-500 to-emerald-600 border-b-emerald-800 text-white shadow-sm"
+                          : "bg-slate-200 dark:bg-slate-800 text-slate-500 border-b-slate-400 dark:border-b-slate-950 hover:bg-slate-300"
+                      )}
+                    >
+                      {p.isPaid ? '✓ مدفوع' : '✗ غير مدفوع'}
+                    </button>
+
+                    <div className="text-right">
+                      <p className="text-xs font-black text-slate-800 dark:text-slate-200">{p.monthName}</p>
+                      {p.isPaid && p.paidDate && (
+                        <p className="text-[10px] text-slate-400 mt-0.5">بتاريخ: {p.paidDate}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 justify-end">
+                    <div className="flex items-center gap-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 px-2.5 py-1.5 rounded-xl">
+                      <input 
+                        type="number"
+                        value={p.amount}
+                        onChange={e => handleAmountChange(idx, Number(e.target.value))}
+                        className="w-16 bg-transparent text-center text-xs font-black focus:outline-none dark:text-white"
+                        placeholder="المبلغ"
+                      />
+                      <span className="text-[10px] font-bold text-gray-400">ريال</span>
+                    </div>
+
+                    {p.isPaid && (
+                      <input 
+                        type="date"
+                        value={p.paidDate || ''}
+                        onChange={e => handleDateChange(idx, e.target.value)}
+                        className="px-2 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-xl text-[10px] font-bold focus:outline-none focus:ring-1 focus:ring-primary h-[32px] sm:w-28 text-center"
+                      />
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm(`هل أنت متأكد من حذف شهر ${p.monthName} من قائمة المدفوعات؟`)) {
+                          handleDeleteMonth(idx);
+                        }
+                      }}
+                      className="p-2 text-rose-500 hover:bg-rose-500/10 dark:hover:bg-rose-500/20 rounded-xl transition-all cursor-pointer flex items-center justify-center border border-transparent hover:border-rose-500/10"
+                      title="حذف الشهر"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="p-6 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-3 bg-slate-50 dark:bg-slate-950/40">
+            <button
+              onClick={onClose}
+              className="px-5 py-2.5 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold text-xs rounded-xl hover:bg-slate-100 transition-colors border border-slate-200 dark:border-slate-700 cursor-pointer"
+            >
+              إلغاء
+            </button>
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              disabled={saving}
+              onClick={handleSave}
+              className="px-6 py-2.5 bg-gradient-to-b from-primary to-primary-dark border-b-[3px] border-b-primary-dark text-white font-black text-xs rounded-xl hover:opacity-95 transition-all shadow-md shadow-primary/10 cursor-pointer"
+            >
+              {saving ? 'جاري الحفظ...' : 'حفظ التعديلات ✓'}
+            </motion.button>
+          </div>
+        </motion.div>
+      </div>
+    </AnimatePresence>
+  );
+};
+
 const ApartmentDetailsModal = ({ 
   isOpen, 
   onClose, 
   apartment, 
   requests,
+  tenants,
+  apartments,
   onEdit,
   onUpdateStatus,
   onPrint,
@@ -1013,6 +3051,8 @@ const ApartmentDetailsModal = ({
   onClose: () => void, 
   apartment: { building: string, apartment: string } | null,
   requests: CleaningRequest[],
+  tenants: Tenant[],
+  apartments: Apartment[],
   onEdit: (req: CleaningRequest) => void,
   onUpdateStatus: (id: string, field: 'status' | 'paymentStatus' | 'price', value: string | number) => void,
   onPrint: (req: CleaningRequest) => void,
@@ -1020,10 +3060,17 @@ const ApartmentDetailsModal = ({
   onBulkPrint?: (requests: CleaningRequest[]) => void,
   onDelete: (id: string) => void
 }) => {
+  const [activeSubTab, setActiveSubTab] = useState<'requests' | 'history'>('requests');
   const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'));
 
   if (!isOpen || !apartment) return null;
+
+  const targetApartment = apartments.find(a => a.number === apartment.apartment && PROPERTY_BUILDINGS.find(b => b.id === a.buildingId)?.name === apartment.building);
+  
+  const historyTenants = tenants
+    .filter(t => t.apartmentId === targetApartment?.id && t.status === 'archived')
+    .sort((a, b) => safeToDate(b.endDate).getTime() - safeToDate(a.endDate).getTime());
 
   const aptRequests = requests
     .filter(r => r.buildingName === apartment.building && r.apartmentNumber === apartment.apartment)
@@ -1087,7 +3134,31 @@ const ApartmentDetailsModal = ({
           </div>
 
           <div className="p-8 max-h-[70vh] overflow-y-auto custom-scrollbar">
-            <div className="bg-gray-50 dark:bg-slate-800/50 p-6 rounded-3xl mb-8 border border-gray-100 dark:border-slate-800">
+            <div className="flex items-center gap-4 mb-6 bg-gray-100 dark:bg-slate-800 p-1.5 rounded-2xl w-fit font-cairo">
+              <button 
+                onClick={() => setActiveSubTab('requests')}
+                className={cn(
+                  "px-6 py-2 rounded-xl text-xs font-black transition-all",
+                  activeSubTab === 'requests' ? "bg-white dark:bg-slate-700 text-primary shadow-sm" : "text-gray-500 hover:text-gray-700"
+                )}
+              >
+                الطلبات والخدمات
+              </button>
+              <button 
+                onClick={() => setActiveSubTab('history')}
+                className={cn(
+                  "px-6 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2",
+                  activeSubTab === 'history' ? "bg-white dark:bg-slate-700 text-primary shadow-sm" : "text-gray-500 hover:text-gray-700"
+                )}
+              >
+                <History size={14} />
+                سجل العقود السابقة
+              </button>
+            </div>
+
+            {activeSubTab === 'requests' ? (
+              <>
+                <div className="bg-gray-50 dark:bg-slate-800/50 p-6 rounded-3xl mb-8 border border-gray-100 dark:border-slate-800">
               <div className="flex flex-col md:flex-row md:items-center gap-6">
                 <div className="flex-1">
                   <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">تصفية حسب التاريخ</label>
@@ -1173,7 +3244,7 @@ const ApartmentDetailsModal = ({
                         </td>
                         <td className="px-4 py-4">
                           <button 
-                            onClick={() => onUpdateStatus(req.id, 'paymentStatus', req.paymentStatus === 'unpaid' ? 'paid' : 'unpaid')}
+                            onClick={() => onUpdateStatus(req.id, 'paymentStatus', req.paymentStatus === 'paid' ? 'unpaid' : 'paid')}
                             className={cn(
                               "px-3 py-1 rounded-full text-[10px] font-bold",
                               req.paymentStatus === 'paid' ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"
@@ -1215,10 +3286,315 @@ const ApartmentDetailsModal = ({
                 </table>
               </div>
             </div>
+            </>
+          ) : (
+            <div className="space-y-6">
+              <h3 className="text-lg font-black text-gray-900 dark:text-white flex items-center gap-2">
+                <div className="w-1.5 h-6 bg-primary rounded-full" />
+                العقود المؤرشفة والسابقة
+              </h3>
+              
+              {historyTenants.length > 0 ? (
+                <div className="grid grid-cols-1 gap-4">
+                  {historyTenants.map(t => (
+                    <div key={t.id} className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-gray-100 dark:border-slate-700 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div>
+                        <div className="font-black text-gray-900 dark:text-white text-lg">{t.name}</div>
+                        <div className="text-xs font-bold text-gray-400 mt-1 flex items-center gap-4">
+                          <span className="flex items-center gap-1"><IdCard size={12} /> {t.idNumber}</span>
+                          <span className="flex items-center gap-1"><Phone size={12} /> {t.phone}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-8">
+                        <div className="text-center">
+                          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">الفترة</p>
+                          <p className="text-xs font-bold text-gray-700 dark:text-slate-300">
+                            {format(safeToDate(t.startDate), 'yyyy/MM/dd')} - {format(safeToDate(t.endDate), 'yyyy/MM/dd')}
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">قيمة العقد</p>
+                          <p className="text-xs font-black text-emerald-600 uppercase">{t.contractValue?.toLocaleString()} ر.س</p>
+                        </div>
+                        <motion.button
+                          whileHover={{ scale: 1.1 }}
+                          whileTap={{ scale: 0.9 }}
+                          onClick={async () => {
+                            if (confirm('هل أنت متأكد من استعادة هذا العقد؟ سيتم تفعيل العقد مرة أخرى.')) {
+                              try {
+                                await updateDoc(doc(db, 'tenants', t.id), { status: 'active' });
+                                const aptSnap = await getDoc(doc(db, 'apartments', t.apartmentId));
+                                if (aptSnap.exists() && aptSnap.data().status === 'vacant') {
+                                  await updateDoc(doc(db, 'apartments', t.apartmentId), { 
+                                    status: 'occupied',
+                                    tenantId: t.id
+                                  });
+                                }
+                                toast.success('تمت استعادة العقد بنجاح');
+                              } catch (error) {
+                                console.error(error);
+                                toast.error('حدث خطأ أثناء الاستعادة');
+                              }
+                            }
+                          }}
+                          className="bg-primary/10 text-primary p-3 rounded-2xl flex items-center gap-2 hover:bg-primary/20 transition-all font-bold text-xs"
+                        >
+                          <RotateCcw size={16} />
+                          استعادة العقد
+                        </motion.button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-20 text-center opacity-20 font-cairo">
+                  <History size={48} className="mx-auto mb-3" />
+                  <p className="text-sm font-black">لا يوجد تاريخ عقود مسجل لهذه الوحدة</p>
+                </div>
+              )}
+            </div>
+          )}
           </div>
         </motion.div>
       </div>
     </AnimatePresence>
+  );
+};
+
+const MonthlyListModal = ({
+  isOpen,
+  onClose,
+  requests,
+  onGenerate,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  requests: CleaningRequest[];
+  onGenerate: (targetDateString: string, sourceDateString: string | null, mode: 'blank' | 'copy') => Promise<void>;
+}) => {
+  const [mode, setMode] = useState<'copy' | 'blank'>('copy');
+  const [targetYearMonth, setTargetYearMonth] = useState('');
+  const [sourceYearMonth, setSourceYearMonth] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Generate next 12 months for target choice
+  const targetMonthOptions = React.useMemo(() => {
+    return Array.from({ length: 12 }, (_, i) => {
+      // Show from current month and next 11 months
+      return addMonths(new Date(), i);
+    });
+  }, []);
+
+  // Find all months that currently have requests in state
+  const sourceMonthOptions = React.useMemo(() => {
+    const monthsMap = new Map<string, Date>();
+    requests.forEach(req => {
+      const d = safeToDate(req.date);
+      const key = format(d, 'yyyy-MM');
+      if (!monthsMap.has(key)) {
+        monthsMap.set(key, d);
+      }
+    });
+    return Array.from(monthsMap.values()).sort((a, b) => b.getTime() - a.getTime());
+  }, [requests]);
+
+  // Set initial defaults
+  useEffect(() => {
+    if (isOpen) {
+      // Default target month to next month
+      const nextMonth = addMonths(new Date(), 1);
+      setTargetYearMonth(format(nextMonth, 'yyyy-MM'));
+      
+      // Default source to current month (or latest month with requests)
+      if (sourceMonthOptions.length > 0) {
+        setSourceYearMonth(format(sourceMonthOptions[0], 'yyyy-MM'));
+      } else {
+        setSourceYearMonth(format(new Date(), 'yyyy-MM'));
+      }
+      setMode('copy');
+    }
+  }, [isOpen, sourceMonthOptions]);
+
+  if (!isOpen) return null;
+
+  // Let's compute how many requests of chosen source exist
+  const getSourceRequestsCount = () => {
+    if (!sourceYearMonth) return 0;
+    const sourceDate = new Date(sourceYearMonth + '-01');
+    return requests.filter(req => isSameMonth(safeToDate(req.date), sourceDate)).length;
+  };
+
+  const selectedSourceCount = getSourceRequestsCount();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!targetYearMonth) {
+      toast.error('يرجى اختيار الشهر المستهدف');
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      await onGenerate(targetYearMonth, mode === 'copy' ? sourceYearMonth : null, mode);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[110] p-4 backdrop-blur-sm" dir="rtl">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        className="bg-white dark:bg-slate-900 rounded-[2.5rem] w-full max-w-lg overflow-hidden shadow-2xl border border-gray-100 dark:border-slate-800"
+      >
+        {/* Header */}
+        <div className="p-6 sm:p-8 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between bg-gray-50/50 dark:bg-slate-900/50">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center">
+              <Calendar size={20} />
+            </div>
+            <div>
+              <h2 className="font-black text-xl text-gray-900 dark:text-white">إضافة قائمة تشغيلية لشهر جديد</h2>
+              <p className="text-xs text-gray-400 dark:text-slate-400 mt-1">تسهيل عملية جدولة وإعداد المهام شهرياً</p>
+            </div>
+          </div>
+          <button 
+            type="button"
+            onClick={onClose} 
+            className="p-2 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-gray-500 rounded-xl transition-all"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 sm:p-8 space-y-6">
+          {/* Target Month */}
+          <div className="space-y-2">
+            <label className="text-xs font-black text-gray-400 dark:text-slate-550 block">الشهر المستهدف (القائمة الجديدة)</label>
+            <select
+              required
+              value={targetYearMonth}
+              onChange={e => setTargetYearMonth(e.target.value)}
+              className="w-full px-4 py-3 bg-gray-50 dark:bg-slate-800/40 border border-gray-250/60 dark:border-slate-700/60 rounded-2xl text-sm font-black focus:ring-4 focus:ring-primary/10 hover:border-gray-350 outline-none transition-all dark:text-white"
+            >
+              <option value="" disabled>اختر الشهر...</option>
+              {targetMonthOptions.map(m => {
+                const value = format(m, 'yyyy-MM');
+                const label = format(m, 'MMMM yyyy', { locale: ar });
+                return <option key={value} value={value}>{label}</option>;
+              })}
+            </select>
+          </div>
+
+          {/* Creation Method */}
+          <div className="space-y-3">
+            <label className="text-xs font-black text-gray-400 dark:text-slate-550 block">طريقة إنشاء القائمة الجديدة</label>
+            
+            <div className="grid grid-cols-2 gap-4">
+              {/* Option 1: Copy from another month */}
+              <div 
+                onClick={() => setMode('copy')}
+                className={cn(
+                  "p-4 rounded-2xl border-2 cursor-pointer transition-all flex flex-col items-center text-center gap-2",
+                  mode === 'copy' 
+                    ? "border-primary bg-primary/5 text-primary dark:bg-primary/10" 
+                    : "border-gray-150 dark:border-slate-800 hover:bg-gray-50 dark:hover:bg-slate-800/30 text-gray-500 dark:text-slate-400"
+                )}
+              >
+                <Repeat size={22} className={mode === 'copy' ? 'text-primary' : 'text-gray-400'} />
+                <span className="font-black text-xs">نسخ قائمة شهر سابق</span>
+                <span className="text-[10px] text-gray-400 dark:text-slate-500 font-bold">تكرار المهام مع تحديث التواريخ</span>
+              </div>
+
+              {/* Option 2: Blank list */}
+              <div 
+                onClick={() => setMode('blank')}
+                className={cn(
+                  "p-4 rounded-2xl border-2 cursor-pointer transition-all flex flex-col items-center text-center gap-2",
+                  mode === 'blank' 
+                    ? "border-primary bg-primary/5 text-primary dark:bg-primary/10" 
+                    : "border-gray-150 dark:border-slate-800 hover:bg-gray-50 dark:hover:bg-slate-800/30 text-gray-500 dark:text-slate-400"
+                )}
+              >
+                <Calendar size={22} className={mode === 'blank' ? 'text-primary' : 'text-gray-400'} />
+                <span className="font-black text-xs">قائمة فارغة جديدة</span>
+                <span className="text-[10px] text-gray-400 dark:text-slate-500 font-bold">البدء بجدول فارغ تماماً</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Source Month (Only if mode is copy) */}
+          <AnimatePresence>
+            {mode === 'copy' && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="overflow-hidden space-y-4"
+              >
+                <div className="space-y-2 pt-1">
+                  <label className="text-xs font-black text-gray-400 dark:text-slate-550 block">نسخ من قائمة شهر:</label>
+                  <select
+                    value={sourceYearMonth}
+                    onChange={e => setSourceYearMonth(e.target.value)}
+                    className="w-full px-4 py-3 bg-gray-50 dark:bg-slate-800/40 border border-gray-250/60 dark:border-slate-700/60 rounded-2xl text-sm font-black focus:ring-4 focus:ring-primary/10 hover:border-gray-350 outline-none transition-all dark:text-white"
+                  >
+                    {sourceMonthOptions.map(m => {
+                      const value = format(m, 'yyyy-MM');
+                      const label = format(m, 'MMMM yyyy', { locale: ar });
+                      const count = requests.filter(req => isSameMonth(safeToDate(req.date), m)).length;
+                      return (
+                        <option key={value} value={value}>
+                          {label} ({count} طلب مجدول)
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                {selectedSourceCount > 0 && (
+                  <div className="p-4 bg-gray-50 dark:bg-slate-800/30 rounded-2xl border border-gray-100 dark:border-slate-800 flex items-center gap-3">
+                    <div className="text-emerald-500 shrink-0">
+                      <CheckCircle size={18} />
+                    </div>
+                    <p className="text-xs text-gray-600 dark:text-slate-400 font-black leading-relaxed">
+                      تم العثور على <span className="text-primary font-extrabold">{selectedSourceCount}</span> طلب جاهز للنسخ. سيقوم النظام بنقلها إلى الشهر الجديد مع الحفاظ على نفس اليوم والوقت لكل طلب بشكل منسق.
+                    </p>
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Action Buttons */}
+          <div className="flex gap-3 pt-4 border-t border-gray-100 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-3.5 bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-750 transition-all rounded-2xl font-black text-sm"
+            >
+              إلغاء
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting || (mode === 'copy' && selectedSourceCount === 0)}
+              className="flex-1 py-3.5 bg-primary text-white hover:bg-primary/95 transition-all rounded-2xl font-black text-sm disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-primary/15 dark:shadow-none flex items-center justify-center gap-2"
+            >
+              {isSubmitting ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <span>جاري إنشاء القائمة...</span>
+                </>
+              ) : mode === 'copy' ? (
+                <span>إنشاء ونسخ المهام ({selectedSourceCount})</span>
+              ) : (
+                <span>إنشاء قائمة فارغة</span>
+              )}
+            </button>
+          </div>
+        </form>
+      </motion.div>
+    </div>
   );
 };
 
@@ -1242,6 +3618,7 @@ const BookingModal = ({
     apartmentNumber: '',
     serviceType: defaultService || SERVICES[0].name || '',
     monthsCount: 1,
+    unitPrice: SERVICES.find(s => s.name === (defaultService || SERVICES[0].name))?.price || 100,
     price: SERVICES.find(s => s.name === (defaultService || SERVICES[0].name))?.price || 100,
     workerName: '',
     dates: [format(new Date(), "yyyy-MM-dd'T'HH:mm")],
@@ -1257,11 +3634,13 @@ const BookingModal = ({
   useEffect(() => {
     if (isOpen) {
       if (initialData) {
+        const uPrice = initialData.unitPrice || (initialData.price / (initialData.monthsCount || 1));
         setFormData({
           buildingName: initialData.buildingName || BUILDINGS[0] || '',
           apartmentNumber: initialData.apartmentNumber || '',
           serviceType: initialData.serviceType || SERVICES[0].name || '',
           monthsCount: initialData.monthsCount || 1,
+          unitPrice: uPrice,
           price: initialData.price || 0,
           workerName: initialData.workerName || '',
           dates: [format(safeToDate(initialData.date), "yyyy-MM-dd'T'HH:mm")],
@@ -1276,12 +3655,14 @@ const BookingModal = ({
       } else {
         const service = defaultService || SERVICES[0].name;
         const serviceData = SERVICES.find(s => s.name === service);
+        const uPrice = serviceData?.price || 100;
         setFormData({
           buildingName: defaultBuilding || BUILDINGS[0] || '',
           apartmentNumber: '',
           serviceType: service,
           monthsCount: 1,
-          price: serviceData?.price || 100,
+          unitPrice: uPrice,
+          price: uPrice,
           workerName: '',
           dates: [format(new Date(), "yyyy-MM-dd'T'HH:mm")],
           notes: '',
@@ -1347,6 +3728,7 @@ const BookingModal = ({
       createdAt: Timestamp.fromDate(new Date(formData.createdAt)),
       price: Number(formData.price),
       monthsCount: Number(formData.monthsCount),
+      unitPrice: Number(formData.unitPrice),
       id: initialData?.id
     });
     onClose();
@@ -1438,7 +3820,17 @@ const BookingModal = ({
                 value={formData.serviceType}
                 onChange={e => {
                   const service = currentServices.find(s => s.name === e.target.value);
-                  setFormData({...formData, serviceType: e.target.value, price: (service?.price || 100) * formData.monthsCount});
+                  const uPrice = service?.price || 100;
+                  const datesCount = formData.dates.length || 1;
+                  const recurringCount = formData.isRecurring ? (formData.selectedMonths.length + 1) : 1;
+                  const gallons = e.target.value === 'توصيل مياه' ? formData.waterGallons : 1;
+                  const factor = e.target.value === 'توصيل مياه' ? (gallons * datesCount) : (datesCount > 1 ? datesCount : formData.monthsCount);
+                  setFormData({
+                    ...formData, 
+                    serviceType: e.target.value, 
+                    unitPrice: uPrice,
+                    price: uPrice * factor * recurringCount
+                  });
                 }}
               >
                 {currentServices.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
@@ -1450,8 +3842,19 @@ const BookingModal = ({
                 type="number"
                 required
                 className="w-full p-3 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary text-sm text-gray-900 dark:text-white font-bold transition-all"
-                value={formData.price}
-                onChange={e => setFormData({...formData, price: Number(e.target.value)})}
+                value={formData.unitPrice}
+                onChange={e => {
+                  const uPrice = Number(e.target.value);
+                  const datesCount = formData.dates.length || 1;
+                  const recurringCount = formData.isRecurring ? (formData.selectedMonths.length + 1) : 1;
+                  const gallons = formData.serviceType === 'توصيل مياه' ? formData.waterGallons : 1;
+                  const factor = formData.serviceType === 'توصيل مياه' ? (gallons * datesCount) : (datesCount > 1 ? datesCount : formData.monthsCount);
+                  setFormData({
+                    ...formData, 
+                    unitPrice: uPrice, 
+                    price: uPrice * factor * recurringCount
+                  });
+                }}
               />
             </div>
           </div>
@@ -1480,7 +3883,15 @@ const BookingModal = ({
                   onChange={e => {
                     const gallons = Number(e.target.value);
                     const service = SERVICES.find(s => s.name === formData.serviceType);
-                    setFormData({...formData, waterGallons: gallons, price: (service?.price || 10) * gallons * formData.monthsCount});
+                    const uPrice = service?.price || 10;
+                    const datesCount = formData.dates.length || 1;
+                    const recurringCount = formData.isRecurring ? (formData.selectedMonths.length + 1) : 1;
+                    setFormData({
+                      ...formData, 
+                      waterGallons: gallons, 
+                      unitPrice: uPrice,
+                      price: uPrice * gallons * datesCount * recurringCount
+                    });
                   }}
                 />
               </div>
@@ -1495,8 +3906,14 @@ const BookingModal = ({
                   value={formData.monthsCount}
                   onChange={e => {
                     const months = Number(e.target.value);
-                    const service = SERVICES.find(s => s.name === formData.serviceType);
-                    setFormData({...formData, monthsCount: months, price: (service?.price || 100) * months});
+                    const datesCount = formData.dates.length || 1;
+                    const recurringCount = formData.isRecurring ? (formData.selectedMonths.length + 1) : 1;
+                    const factor = datesCount > 1 ? datesCount : months;
+                    setFormData({
+                      ...formData, 
+                      monthsCount: months, 
+                      price: formData.unitPrice * factor * recurringCount
+                    });
                   }}
                 />
               </div>
@@ -1529,7 +3946,12 @@ const BookingModal = ({
                     type="button"
                     onClick={() => {
                       const newDates = formData.dates.filter((_, i) => i !== idx);
-                      setFormData({...formData, dates: newDates});
+                      const datesCount = newDates.length || 1;
+                      const recurringCount = formData.isRecurring ? (formData.selectedMonths.length + 1) : 1;
+                      const gallons = formData.serviceType === 'توصيل مياه' ? (formData.waterGallons || 1) : 1;
+                      const factor = formData.serviceType === 'توصيل مياه' ? (gallons * datesCount) : (datesCount > 1 ? datesCount : formData.monthsCount);
+                      const newTotal = formData.unitPrice * factor * recurringCount;
+                      setFormData({...formData, dates: newDates, price: newTotal});
                     }}
                     className="p-3 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 rounded-xl hover:bg-rose-100 transition-all"
                   >
@@ -1543,7 +3965,15 @@ const BookingModal = ({
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   type="button"
-                  onClick={() => setFormData({...formData, dates: [...formData.dates, format(new Date(), "yyyy-MM-dd'T'HH:mm")]})}
+                  onClick={() => {
+                    const newDates = [...formData.dates, format(new Date(), "yyyy-MM-dd'T'HH:mm")];
+                    const datesCount = newDates.length;
+                    const recurringCount = formData.isRecurring ? (formData.selectedMonths.length + 1) : 1;
+                    const gallons = formData.serviceType === 'توصيل مياه' ? (formData.waterGallons || 1) : 1;
+                    const factor = formData.serviceType === 'توصيل مياه' ? (gallons * datesCount) : (datesCount > 1 ? datesCount : formData.monthsCount);
+                    const newTotal = formData.unitPrice * factor * recurringCount;
+                    setFormData({...formData, dates: newDates, price: newTotal});
+                  }}
                   className="w-full py-2.5 border-2 border-dashed border-gray-200 dark:border-slate-700 rounded-xl text-gray-400 hover:text-primary hover:border-primary/30 transition-all flex items-center justify-center gap-2 font-bold text-xs"
                 >
                   <Plus size={16} />
@@ -1560,7 +3990,19 @@ const BookingModal = ({
                 required
                 className="w-full p-3 bg-gray-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 focus:ring-primary text-gray-900 dark:text-white font-black text-lg transition-all"
                 value={formData.price}
-                onChange={e => setFormData({...formData, price: Number(e.target.value)})}
+                onChange={e => {
+                  const totalPrice = Number(e.target.value);
+                  const datesCount = formData.dates.length || 1;
+                  const recurringCount = formData.isRecurring ? (formData.selectedMonths.length + 1) : 1;
+                  const gallons = formData.serviceType === 'توصيل مياه' ? (formData.waterGallons || 1) : 1;
+                  const factor = formData.serviceType === 'توصيل مياه' ? (gallons * datesCount) : (datesCount > 1 ? datesCount : formData.monthsCount);
+                  const denominator = factor * recurringCount;
+                  setFormData({
+                    ...formData, 
+                    price: totalPrice,
+                    unitPrice: denominator > 0 ? (totalPrice / denominator) : totalPrice
+                  });
+                }}
               />
             </div>
             <div className="space-y-1.5">
@@ -1596,7 +4038,15 @@ const BookingModal = ({
               id="isRecurring"
               className="w-4 h-4 text-primary rounded focus:ring-primary"
               checked={formData.isRecurring}
-              onChange={e => setFormData({...formData, isRecurring: e.target.checked})}
+              onChange={e => {
+                const checked = e.target.checked;
+                const datesCount = formData.dates.length || 1;
+                const recurringCount = checked ? (formData.selectedMonths.length + 1) : 1;
+                const gallons = formData.serviceType === 'توصيل مياه' ? (formData.waterGallons || 1) : 1;
+                const factor = formData.serviceType === 'توصيل مياه' ? (gallons * datesCount) : (datesCount > 1 ? datesCount : formData.monthsCount);
+                const newTotal = formData.unitPrice * factor * recurringCount;
+                setFormData({...formData, isRecurring: checked, price: newTotal});
+              }}
             />
             <label htmlFor="isRecurring" className="text-sm font-bold text-primary dark:text-white flex items-center gap-2">
               <Repeat size={16} />
@@ -1659,7 +4109,12 @@ const BookingModal = ({
                       const newMonths = formData.selectedMonths.includes(idx)
                         ? formData.selectedMonths.filter(m => m !== idx)
                         : [...formData.selectedMonths, idx];
-                      setFormData({...formData, selectedMonths: newMonths});
+                      const datesCount = formData.dates.length || 1;
+                      const recurringCount = newMonths.length + 1;
+                      const gallons = formData.serviceType === 'توصيل مياه' ? (formData.waterGallons || 1) : 1;
+                      const factor = formData.serviceType === 'توصيل مياه' ? (gallons * datesCount) : (datesCount > 1 ? datesCount : formData.monthsCount);
+                      const newTotal = formData.unitPrice * factor * recurringCount;
+                      setFormData({...formData, selectedMonths: newMonths, price: newTotal});
                     }}
                     className={cn(
                       "py-2 px-1 rounded-xl text-[10px] font-bold transition-all border",
@@ -1678,7 +4133,7 @@ const BookingModal = ({
                     سيتم إنشاء {formData.dates.length * (formData.selectedMonths.length + 1)} طلبات إجمالاً ({formData.dates.length} طلبات لكل شهر مختار)
                   </p>
                   <p className="text-xs font-black text-primary/80 dark:text-primary/90 mt-1">
-                    التكلفة الإجمالية: {formData.price * formData.dates.length * (formData.selectedMonths.length + 1)} ريال
+                    التكلفة الإجمالية: {formData.price} ريال
                   </p>
                 </div>
               )}
@@ -2606,6 +5061,349 @@ const TenantModal = ({ isOpen, onClose, onSave, initialData, apartments }: any) 
   );
 };
 
+const ClubSubPrintModal = ({ 
+  isOpen, 
+  onClose, 
+  subscriptions, 
+  onPrint 
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  subscriptions: ClubSubscription[]; 
+  onPrint: (sub: ClubSubscription) => void;
+}) => {
+  const [selectedSubId, setSelectedSubId] = useState<string>('');
+
+  React.useEffect(() => {
+    if (subscriptions.length > 0 && !selectedSubId) {
+      setSelectedSubId(subscriptions[0].id);
+    }
+  }, [subscriptions, selectedSubId]);
+
+  const selectedSub = subscriptions.find(s => s.id === selectedSubId);
+
+  const handlePrintSubmit = () => {
+    if (selectedSub) {
+      onPrint(selectedSub);
+      onClose();
+    } else {
+      toast.error('يرجى تحديد مشترك لطباعة التعهد له');
+    }
+  };
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4"
+          onClick={onClose}
+        >
+          <motion.div 
+            initial={{ scale: 0.9, y: 20 }}
+            animate={{ scale: 1, y: 0 }}
+            exit={{ scale: 0.9, y: 20 }}
+            className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden border border-white/20 dark:border-slate-800"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="p-8">
+              <div className="flex items-center justify-between mb-8">
+                <h3 className="text-2xl font-black text-gray-900 dark:text-white">طباعة تعهد الاشتراك</h3>
+                <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-2xl transition-colors">
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 text-right">اختر المشترك من القائمة</label>
+                  <select
+                    value={selectedSubId}
+                    onChange={(e) => setSelectedSubId(e.target.value)}
+                    className="w-full h-14 px-5 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-primary/20 text-right dir-rtl dark:text-white"
+                    dir="rtl"
+                  >
+                    <option value="">-- يرجى تحديد مشترك --</option>
+                    {subscriptions.map(sub => (
+                      <option key={sub.id} value={sub.id}>
+                        {sub.name} - {sub.workplace}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {selectedSub && (
+                  <div className="p-5 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40 rounded-2xl text-right dir-rtl space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-gray-400 dark:text-slate-400 font-bold">اسم المشترك</span>
+                      <span className="text-sm font-black text-gray-900 dark:text-white">{selectedSub.name}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-gray-400 dark:text-slate-400 font-bold">المبنى/الموضع</span>
+                      <span className="text-sm font-black text-gray-900 dark:text-white">{selectedSub.workplace}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-gray-400 dark:text-slate-400 font-bold">مدة الاشتراك</span>
+                      <span className="text-sm font-black text-gray-900 dark:text-white">{selectedSub.monthsCount} أشهر</span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="flex-1 h-14 bg-gray-100 dark:bg-slate-800 text-gray-500 hover:bg-gray-200 dark:hover:bg-slate-700 rounded-2xl font-black text-sm transition-all"
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handlePrintSubmit}
+                    className="flex-1 h-14 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-sm shadow-xl shadow-emerald-500/20 transition-all flex items-center justify-center gap-2"
+                  >
+                    <Printer size={18} />
+                    طباعة التعهد
+                  </button>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+};
+
+const WhatsAppAlertsModal = ({
+  isOpen,
+  onClose,
+  subscriptions,
+  tenants
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  subscriptions: ClubSubscription[];
+  tenants: Tenant[];
+}) => {
+  const [localPhones, setLocalPhones] = useState<{ [subId: string]: string }>({});
+
+  const getDaysRemaining = (endDateTs: any) => {
+    if (!endDateTs) return 0;
+    const endDate = endDateTs instanceof Timestamp ? endDateTs.toDate() : new Date(endDateTs);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const end = new Date(endDate);
+    end.setHours(0, 0, 0, 0);
+    const diffTime = end.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays;
+  };
+
+  const getExpiringSubs = () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    return subscriptions.filter(sub => {
+      if (!sub.endDate || sub.status === 'locked') return false;
+      const endDate = sub.endDate instanceof Timestamp ? sub.endDate.toDate() : new Date(sub.endDate);
+      const end = new Date(endDate);
+      end.setHours(0, 0, 0, 0);
+      const diffTime = end.getTime() - today.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      return diffDays >= 0 && diffDays <= 7;
+    });
+  };
+
+  const expiringSubs = getExpiringSubs();
+
+  React.useEffect(() => {
+    if (isOpen) {
+      const phones: { [subId: string]: string } = {};
+      expiringSubs.forEach(sub => {
+        const matchingTenant = tenants.find(t => 
+          t.name === sub.name || 
+          t.name.includes(sub.name) || 
+          sub.name.includes(t.name)
+        );
+        phones[sub.id] = sub.phone || matchingTenant?.phone || '';
+      });
+      setLocalPhones(phones);
+    }
+  }, [isOpen, subscriptions, tenants]);
+
+  const handlePhoneChange = (subId: string, val: string) => {
+    setLocalPhones(prev => ({ ...prev, [subId]: val }));
+  };
+
+  const savePhoneToFirestore = async (subId: string, phone: string) => {
+    try {
+      await updateDoc(doc(db, 'clubSubscriptions', subId), { phone });
+    } catch (err) {
+      console.error('Error saving phone number:', err);
+    }
+  };
+
+  const handleSendWhatsAppWeb = async (sub: ClubSubscription) => {
+    const phoneNumber = localPhones[sub.id] || '';
+    if (!phoneNumber.trim()) {
+      toast.error('يرجى تحديد أو إدخال رقم الجوال للمشترك أولاً');
+      return;
+    }
+
+    if (phoneNumber !== sub.phone) {
+      await savePhoneToFirestore(sub.id, phoneNumber);
+    }
+
+    let cleanPhone = phoneNumber.replace(/[\s\-\+]/g, '');
+    if (cleanPhone.startsWith('05')) {
+      cleanPhone = '966' + cleanPhone.substring(1);
+    } else if (cleanPhone.startsWith('5') && cleanPhone.length === 9) {
+      cleanPhone = '966' + cleanPhone;
+    }
+
+    const endFormatted = format(sub.endDate instanceof Timestamp ? sub.endDate.toDate() : new Date(sub.endDate), 'yyyy/MM/dd');
+    const daysLeft = getDaysRemaining(sub.endDate);
+    
+    const renewalUrl = `${window.location.origin}${window.location.pathname}?view=renew-club&subId=${sub.id}`;
+    
+    const text = `السلام عليكم ورحمة الله وبركاته،
+نفيدكم شريكنا العزيز *${sub.name}* بقرب انتهاء اشتراككم في نادي المجمع خلال *${daysLeft}* أيام (بتاريخ ${endFormatted}).
+نسعد بدوام مرافقتكم معنا وتجديد اشتراككم عبر الرابط التالي:
+${renewalUrl}
+
+طاب يومكم بكل خير 🌸`;
+
+    const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`;
+    window.open(waUrl, '_blank');
+    toast.success('تم فتح الواتساب لإرسال التنبيه');
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <AnimatePresence>
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4"
+        onClick={onClose}
+      >
+        <motion.div 
+          initial={{ scale: 0.9, y: 20 }}
+          animate={{ scale: 1, y: 0 }}
+          exit={{ scale: 0.9, y: 20 }}
+          className="bg-white dark:bg-slate-900 w-full max-w-4xl rounded-[2.5rem] shadow-2xl overflow-hidden border border-white/20 dark:border-slate-800"
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="p-8">
+            <div className="flex items-center justify-between mb-8 border-b pb-6 dark:border-slate-800">
+              <div className="flex items-center gap-4">
+                <div className="bg-amber-500 p-3 rounded-2xl shadow-lg shadow-amber-500/20 text-white">
+                  <BellRing size={24} />
+                </div>
+                <div className="text-right">
+                  <h3 className="text-2xl font-black text-gray-900 dark:text-white">تنبيهات انتهاء الاشتراكات (7 أيام)</h3>
+                  <p className="text-gray-500 dark:text-slate-400 font-bold text-xs mt-1">تنبيه المشتركين الذين أوشكت اشتراكاتهم على الانتهاء عبر الواتساب ورابط التجديد.</p>
+                </div>
+              </div>
+              <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-2xl transition-colors text-gray-400">
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="max-h-[60vh] overflow-y-auto space-y-4 pr-1">
+              {expiringSubs.length === 0 ? (
+                <div className="text-center py-16 text-gray-400">
+                  <CheckCircle2 size={56} className="mx-auto mb-4 text-emerald-500 animate-pulse" />
+                  <h4 className="font-black text-lg text-emerald-600 dark:text-emerald-400">نظام المتابعة مكتمل!</h4>
+                  <p className="text-xs font-bold mt-1">لا توجد اشتراكات نشطة تنتهي خلال الـ 7 أيام القادمة.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right border-collapse dir-rtl" dir="rtl">
+                    <thead>
+                      <tr className="border-b dark:border-slate-800 text-gray-400 text-xs">
+                        <th className="pb-4 font-black">الاسم والعمل</th>
+                        <th className="pb-4 font-black">تاريخ الانتهاء</th>
+                        <th className="pb-4 font-black">الأيام المتبقية</th>
+                        <th className="pb-4 font-black">رقم الجوال (واتساب)</th>
+                        <th className="pb-4 font-black text-center">الإجراء</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y dark:divide-slate-800">
+                      {expiringSubs.map((sub) => {
+                        const daysLeft = getDaysRemaining(sub.endDate);
+                        let badgeColor = "bg-blue-100 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400";
+                        if (daysLeft <= 1) {
+                          badgeColor = "bg-rose-100 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400";
+                        } else if (daysLeft <= 3) {
+                          badgeColor = "bg-amber-100 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400";
+                        }
+
+                        return (
+                          <tr key={sub.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/30 transition-colors text-sm font-semibold">
+                            <td className="py-4">
+                              <p className="font-black text-sm text-gray-900 dark:text-white">{sub.name}</p>
+                              <p className="text-xs font-bold text-gray-400 mt-0.5">{sub.workplace === 'other' ? (sub as any).customWorkplace || 'أخرى' : sub.workplace}</p>
+                            </td>
+                            <td className="py-4 font-mono text-xs text-gray-700 dark:text-slate-300">
+                              {format(sub.endDate instanceof Timestamp ? sub.endDate.toDate() : new Date(sub.endDate), 'yyyy/MM/dd')}
+                            </td>
+                            <td className="py-4">
+                              <span className={cn("px-3 py-1 rounded-full text-[11px] font-black", badgeColor)}>
+                                {daysLeft === 0 ? 'ينتهي اليوم' : daysLeft === 1 ? 'ينتهي غداً' : `متبقي ${daysLeft} أيام`}
+                              </span>
+                            </td>
+                            <td className="py-4">
+                              <input 
+                                type="tel" 
+                                value={localPhones[sub.id] || ''} 
+                                onChange={(e) => handlePhoneChange(sub.id, e.target.value)}
+                                placeholder="رقم الجوال 05xxxxxxxx"
+                                className="w-48 px-3 py-2 bg-gray-50 dark:bg-slate-800 border-2 border-transparent focus:border-primary/50 dark:text-white rounded-xl text-xs font-bold focus:outline-none text-right"
+                                dir="ltr"
+                              />
+                            </td>
+                            <td className="py-4 text-center">
+                              <motion.button
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.95 }}
+                                onClick={() => handleSendWhatsAppWeb(sub)}
+                                className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-md shadow-emerald-500/10 cursor-pointer"
+                              >
+                                <MessageSquare size={14} />
+                                تنبيه واتساب تلقائي
+                              </motion.button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 justify-end pt-6 border-t dark:border-slate-800 mt-6">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-6 py-3 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-500 dark:text-white rounded-xl font-black text-sm transition-all cursor-pointer"
+              >
+                إغلاق النافذة
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+};
+
 const ExportModal = ({ isOpen, onClose, data }: { isOpen: boolean; onClose: () => void; data: any[] }) => {
   const [selectedFields, setSelectedFields] = useState<string[]>([
     'buildingName', 'apartmentNumber', 'serviceType', 'date', 'status', 'paymentStatus', 'price'
@@ -2783,7 +5581,7 @@ const ClubSubscriptionModal = ({
         </div>
 
         <div className="p-8 space-y-6 max-h-[70vh] overflow-y-auto custom-scrollbar">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="space-y-2">
               <label className="text-xs font-black text-gray-400 uppercase tracking-widest mr-2">اسم المشترك</label>
               <input 
@@ -2792,6 +5590,16 @@ const ClubSubscriptionModal = ({
                 onChange={(e) => setNewClubSub(prev => ({ ...prev, name: e.target.value }))}
                 className="w-full px-6 py-4 bg-gray-50 dark:bg-slate-800 rounded-2xl border-2 border-transparent focus:border-primary focus:bg-white transition-all outline-none font-bold"
                 placeholder="أدخل الاسم الثلاثي"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-black text-gray-400 uppercase tracking-widest mr-2">رقم الجوال</label>
+              <input 
+                type="tel"
+                value={newClubSub.phone || ''}
+                onChange={(e) => setNewClubSub(prev => ({ ...prev, phone: e.target.value }))}
+                className="w-full px-6 py-4 bg-gray-50 dark:bg-slate-800 rounded-2xl border-2 border-transparent focus:border-primary focus:bg-white transition-all outline-none font-bold text-right"
+                placeholder="05xxxxxxxx"
               />
             </div>
             <div className="space-y-2">
@@ -2965,17 +5773,21 @@ const BrandingModal = ({
   initialBackground, 
   initialThemeColor, 
   initialBgOpacity,
+  initialAdminPhone,
+  initialWhatsappGroupLink,
   isDarkMode,
   setIsDarkMode
 }: { 
   isOpen: boolean; 
   onClose: () => void; 
-  onSave: (name: string, logo: string | null, background: string | null, color: string, opacity: number) => void;
+  onSave: (name: string, logo: string | null, background: string | null, color: string, opacity: number, adminPhone: string, whatsappGroupLink: string) => void;
   initialName: string;
   initialLogo: string | null;
   initialBackground: string | null;
   initialThemeColor: string;
   initialBgOpacity: number;
+  initialAdminPhone?: string;
+  initialWhatsappGroupLink?: string;
   isDarkMode: boolean;
   setIsDarkMode: (val: boolean) => void;
 }) => {
@@ -2984,6 +5796,8 @@ const BrandingModal = ({
   const [background, setBackground] = useState<string | null>(initialBackground);
   const [color, setColor] = useState(initialThemeColor);
   const [opacity, setOpacity] = useState(initialBgOpacity);
+  const [adminPhone, setAdminPhone] = useState(initialAdminPhone || '');
+  const [whatsappGroupLink, setWhatsappGroupLink] = useState(initialWhatsappGroupLink || '');
 
   useEffect(() => {
     if (isOpen) {
@@ -2992,8 +5806,10 @@ const BrandingModal = ({
       setBackground(initialBackground);
       setColor(initialThemeColor);
       setOpacity(initialBgOpacity);
+      setAdminPhone(initialAdminPhone || '');
+      setWhatsappGroupLink(initialWhatsappGroupLink || '');
     }
-  }, [isOpen, initialName, initialLogo, initialBackground, initialThemeColor, initialBgOpacity]);
+  }, [isOpen, initialName, initialLogo, initialBackground, initialThemeColor, initialBgOpacity, initialAdminPhone, initialWhatsappGroupLink]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'background') => {
     const file = e.target.files?.[0];
@@ -3056,6 +5872,31 @@ const BrandingModal = ({
                   className="w-full px-6 py-4 bg-gray-50 dark:bg-slate-800 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary transition-all text-gray-900 dark:text-white"
                   placeholder="أدخل اسم التطبيق..."
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-3">رقم جوال المدير (لتلقي إشعارات الحجز والدفع عبر واتساب)</label>
+                <input 
+                  type="tel" 
+                  value={adminPhone}
+                  onChange={e => setAdminPhone(e.target.value)}
+                  className="w-full px-6 py-4 bg-gray-50 dark:bg-slate-800 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary transition-all text-gray-900 dark:text-white text-right placeholder-gray-400"
+                  placeholder="مثال: 9665xxxxxxxx"
+                />
+                <span className="text-[10px] text-gray-450 mt-1 block">يرجى كتابة الرقم بالصيغة الدولية بدون رمز الزائد (مثال: 966555555555)</span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-3">رابط مجموعة واتساب لمتابعة وتتبع الدفع</label>
+                <input 
+                  type="url" 
+                  value={whatsappGroupLink}
+                  onChange={e => setWhatsappGroupLink(e.target.value)}
+                  className="w-full px-6 py-4 bg-gray-50 dark:bg-slate-800 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-primary transition-all text-gray-900 dark:text-white placeholder-gray-400 text-left"
+                  placeholder="https://chat.whatsapp.com/..."
+                  dir="ltr"
+                />
+                <span className="text-[10px] text-gray-450 mt-1 block">يمكنك نسخ رابط الـ QR المرسل أو أي مجموعة واتساب خاصة بتتبع المدفوعات لمشاركتها مع الأعضاء والعملاء</span>
               </div>
 
               <div>
@@ -3148,24 +5989,11 @@ const BrandingModal = ({
                 />
               </div>
 
-              <div className="flex items-center justify-between p-5 bg-gray-50 dark:bg-slate-800/50 rounded-3xl border border-gray-100 dark:border-slate-800">
-                <div className="theme-switch-wrapper">
-                  <label className="theme-switch" htmlFor="modal-checkbox">
-                    <input 
-                      type="checkbox" 
-                      id="modal-checkbox" 
-                      checked={isDarkMode}
-                      onChange={() => setIsDarkMode(!isDarkMode)}
-                    />
-                    <div className="slider round"></div>
-                  </label>
-                  <em className="text-sm font-black text-gray-900 dark:text-white not-italic">الوضع الداكن</em>
-                </div>
-              </div>
+
 
               <div className="pt-4">
                 <button 
-                  onClick={() => onSave(name, logo, background, color, opacity)}
+                  onClick={() => onSave(name, logo, background, color, opacity, adminPhone, whatsappGroupLink)}
                   className="w-full py-4 bg-primary text-white rounded-2xl font-black text-sm shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-[0.98] transition-all"
                 >
                   حفظ التغييرات
@@ -3198,6 +6026,164 @@ function AppContent() {
   const [aptStatusFilter, setAptStatusFilter] = useState<'all' | 'vacant' | 'occupied'>('all');
   const [aptBuildingFilter, setAptBuildingFilter] = useState<string>('all');
   const [selectedAptIds, setSelectedAptIds] = useState<string[]>([]);
+  const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
+  const [selectedWhatsAppTenant, setSelectedWhatsAppTenant] = useState<Tenant | null>(null);
+  const [isSubscriptionModalOpen, setIsSubscriptionModalOpen] = useState(false);
+  const [isActionsDropdownOpen, setIsActionsDropdownOpen] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [isListeningApt, setIsListeningApt] = useState(false);
+
+  const cleanSpokenArabicText = (text: string): string => {
+    return text
+      .replace(/شقة\s*/g, '')
+      .replace(/شقه\s*/g, '')
+      .replace(/ابحث\s*عن\s*/g, '')
+      .replace(/رقم\s*/g, '')
+      .trim();
+  };
+
+  const convertSpokenArabicToDigits = (text: string): string => {
+    let cleaned = text.trim();
+    
+    const arabicDigits: { [key: string]: string } = {
+      'صفر': '0', 'واحد': '1', 'اثنان': '2', 'اثنين': '2', 'إثنين': '2',
+      'ثلاثة': '3', 'ثلاثه': '3', 'اربعة': '4', 'أربعة': '4', 'خمسة': '5', 'خمسه': '5',
+      'ستة': '6', 'سته': '6', 'سبعة': '7', 'سبعه': '7', 'ثمانية': '8', 'ثمانيه': '8',
+      'تسعة': '9', 'تسعه': '9', 'شقة': '', 'شقه': '', 'رقم': ''
+    };
+
+    const words = cleaned.split(/\s+/);
+    const mappedWords = words.map(w => {
+      const cleanWord = w.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"");
+      if (arabicDigits[cleanWord] !== undefined) {
+        return arabicDigits[cleanWord];
+      }
+      if (/^\d+$/.test(cleanWord)) {
+        return cleanWord;
+      }
+      return w;
+    });
+
+    const joinedStr = mappedWords.join(' ').replace(/\s+/g, '');
+    if (/^\d+$/.test(joinedStr)) {
+      return joinedStr;
+    }
+    
+    const digitsOnly = cleaned.replace(/\D/g, '');
+    if (digitsOnly.length > 0) {
+      return digitsOnly;
+    }
+
+    return cleanSpokenArabicText(cleaned);
+  };
+
+  const startVoiceSearch = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+      toast.error("متصفحك لا يدعم ميزة التعرف على الكلام. يرجى استخدام متصفح Chrome أو Safari.");
+      return;
+    }
+
+    if (isListening) return;
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'ar-SA';
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        toast.info("جاري الاستماع... تحدث برقم الشقة أو الكلمات المراد البحث عنها");
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognition.onerror = (event: any) => {
+        console.warn("Speech recognition error", event.error);
+        setIsListening(false);
+        if (event.error === 'not-allowed') {
+          toast.error("تم رفض إذن الميكروفون. يرجى تفعيل الإذن، وإذا كنت تستخدم المعاينة داخل AI Studio يرجى فتح التطبيق في نافذة جديدة لاستخدام البحث الصوتي.");
+        } else if (event.error === 'no-speech') {
+          toast("لم يتم سماع أي صوت. يرجى المحاولة مرة أخرى.");
+        } else {
+          toast.error("حدث خطأ أثناء التعرف على الصوت.");
+        }
+      };
+
+      recognition.onresult = (event: any) => {
+        const resultString = event.results[0][0].transcript;
+        if (resultString) {
+          const converted = convertSpokenArabicToDigits(resultString);
+          setSearchTerm(converted);
+          toast.success(`تم التعرف الصوتي: ${converted}`);
+        }
+      };
+
+      recognition.start();
+    } catch (e) {
+      console.error(e);
+      setIsListening(false);
+      toast.error("خطأ في تشغيل ميزة البحث الصوتي");
+    }
+  };
+
+  const startVoiceSearchApt = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+      toast.error("متصفحك لا يدعم ميزة التعرف على الكلام. يرجى استخدام متصفح Chrome أو Safari.");
+      return;
+    }
+
+    if (isListeningApt) return;
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'ar-SA';
+
+      recognition.onstart = () => {
+        setIsListeningApt(true);
+        toast.info("جاري الاستماع... تحدث برقم الشقة أو المبنى");
+      };
+
+      recognition.onend = () => {
+        setIsListeningApt(false);
+      };
+
+      recognition.onerror = (event: any) => {
+        console.warn("Speech recognition error", event.error);
+        setIsListeningApt(false);
+        if (event.error === 'not-allowed') {
+          toast.error("تم رفض إذن الميكروفون. يرجى تفعيل الإذن، وإذا كنت تستخدم المعاينة داخل AI Studio يرجى فتح التطبيق في نافذة جديدة لاستخدام البحث الصوتي.");
+        } else if (event.error === 'no-speech') {
+          toast("لم يتم سماع أي صوت. يرجى المحاولة مرة أخرى.");
+        } else {
+          toast.error("حدث خطأ أثناء التعرف على الصوت.");
+        }
+      };
+
+      recognition.onresult = (event: any) => {
+        const resultString = event.results[0][0].transcript;
+        if (resultString) {
+          const converted = convertSpokenArabicToDigits(resultString);
+          setAptSearch(converted);
+          toast.success(`تم التعرف الصوتي: ${converted}`);
+        }
+      };
+
+      recognition.start();
+    } catch (e) {
+      console.error(e);
+      setIsListeningApt(false);
+      toast.error("خطأ في تشغيل ميزة البحث الصوتي");
+    }
+  };
 
   const deleteSelectedApartments = async () => {
     if (selectedAptIds.length === 0) return;
@@ -3318,8 +6304,14 @@ function AppContent() {
   const [isPrintingBulk, setIsPrintingBulk] = useState(false);
   const [bulkPrintRequests, setBulkPrintRequests] = useState<CleaningRequest[]>([]);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [isMonthlyListModalOpen, setIsMonthlyListModalOpen] = useState(false);
+  const [confirmDuplicatePrevMonth, setConfirmDuplicatePrevMonth] = useState(false);
   const [confirmDeleteLogId, setConfirmDeleteLogId] = useState<string | null>(null);
+  const [confirmDeleteClubSubId, setConfirmDeleteClubSubId] = useState<string | null>(null);
+  const [confirmDeleteAptRequests, setConfirmDeleteAptRequests] = useState<{ building: string; apartment: string } | null>(null);
   const [confirmSaveData, setConfirmSaveData] = useState<any | null>(null);
+  const [customPhoneInput, setCustomPhoneInput] = useState<{ [key: string]: string }>({});
+  const [activePhoneInputId, setActivePhoneInputId] = useState<string | null>(null);
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'paid' | 'unpaid'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'completed'>('all');
   const [serviceFilter, setServiceFilter] = useState<'all' | 'apartments' | 'cars'>('all');
@@ -3336,17 +6328,29 @@ function AppContent() {
   const [appBackground, setAppBackground] = useState<string | null>(null);
   const [bgOpacity, setBgOpacity] = useState(20);
   const [themeColor, setThemeColor] = useState('emerald');
+  const [adminPhone, setAdminPhone] = useState('');
+  const [whatsappGroupLink, setWhatsappGroupLink] = useState('https://chat.whatsapp.com/GiYTHd978eMJ3o2oEDb2JC');
   const [clubSubscriptions, setClubSubscriptions] = useState<ClubSubscription[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [workerForm, setWorkerForm] = useState({ name: '', phone: '' });
   const [isAddingWorker, setIsAddingWorker] = useState(false);
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const gameRoomBookings = React.useMemo(() => 
+    bookings.filter(b => b.serviceType === 'حجز غرفة الألعاب'), 
+  [bookings]);
+  const [isGameRoomModalOpen, setIsGameRoomModalOpen] = useState(false);
+  const [editingGameRoomBooking, setEditingGameRoomBooking] = useState<Booking | null>(null);
   const [isClubSubscriptionModalOpen, setIsClubSubscriptionModalOpen] = useState(false);
+  const [isClubSubPrintModalOpen, setIsClubSubPrintModalOpen] = useState(false);
+  const [isWhatsAppAlertsModalOpen, setIsWhatsAppAlertsModalOpen] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isRegisterMode, setIsRegisterMode] = useState(false);
   const [loginForm, setLoginForm] = useState({ username: '', password: '', displayName: '' });
   const [loginMethod, setLoginMethod] = useState<'username' | 'phone'>('username');
   const [isPublicBookingView, setIsPublicBookingView] = useState(false);
+  const [isOverduePanelExpanded, setIsOverduePanelExpanded] = useState(false);
+  const [publicView, setPublicView] = useState<'book' | 'renew-club' | null>(null);
+  const [renewalSubId, setRenewalSubId] = useState<string | null>(null);
   const [apartments, setApartments] = useState<Apartment[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [isFinancialDashboardOpen, setIsFinancialDashboardOpen] = useState(false);
@@ -3354,6 +6358,7 @@ function AppContent() {
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const aptFileInputRef = useRef<HTMLInputElement>(null);
+  const requestsFileInputRef = useRef<HTMLInputElement>(null);
   const [tenantSearch, setTenantSearch] = useState('');
   const [tenantFilter, setTenantFilter] = useState<'active' | 'archived'>('active');
   const [tenantSortField, setTenantSortField] = useState<keyof Tenant | 'aptNumber'>('name');
@@ -3388,21 +6393,15 @@ function AppContent() {
 
   const [isBrandingModalOpen, setIsBrandingModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    const saved = localStorage.getItem('theme');
-    return saved === null ? true : saved === 'dark';
-  });
+  const [isAptCodesModalOpen, setIsAptCodesModalOpen] = useState(false);
+  const [selectedSubscriptionForPayments, setSelectedSubscriptionForPayments] = useState<CleaningRequest | null>(null);
+  const [isDarkMode, setIsDarkMode] = useState(false);
 
   useEffect(() => {
-    localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-      document.body.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      document.body.classList.remove('dark');
-    }
-  }, [isDarkMode]);
+    localStorage.setItem('theme', 'light');
+    document.documentElement.classList.remove('dark');
+    document.body.classList.remove('dark');
+  }, []);
 
   const invoiceRef = useRef<HTMLDivElement>(null);
   const statementRef = useRef<HTMLDivElement>(null);
@@ -3410,7 +6409,59 @@ function AppContent() {
   const inventoryReportRef = useRef<HTMLDivElement>(null);
   const staffReportRef = useRef<HTMLDivElement>(null);
   const bulkInvoicesRef = useRef<HTMLDivElement>(null);
+  const clubSubscriptionFormRef = useRef<HTMLDivElement>(null);
+  const [selectedClubSubForPrint, setSelectedClubSubForPrint] = useState<ClubSubscription | null>(null);
   const isAdmin = user?.uid === 'fyozr-admin-user' || user?.email === '11aabbcc54@gmail.com' || (user as any)?.role === 'admin';
+
+  const exportAnyToExcel = (dataList: any[], fields: { id: string; label: string }[], filename: string) => {
+    if (!dataList || dataList.length === 0) {
+      toast.error('لا توجد بيانات لتصديرها');
+      return;
+    }
+    try {
+      const exportData = dataList.map((item) => {
+        const row: any = {};
+        fields.forEach(field => {
+          let value = item[field.id];
+          if (value && typeof value === 'object' && value.toDate) {
+            try {
+              value = format(value.toDate(), 'yyyy-MM-dd HH:mm');
+            } catch (e) {
+              value = String(value);
+            }
+          } else if (value instanceof Date) {
+            value = format(value, 'yyyy-MM-dd HH:mm');
+          }
+          
+          // Localization maps
+          if (value === 'paid') value = 'مدفوع';
+          if (value === 'unpaid') value = 'معلق';
+          if (value === 'completed') value = 'تم التنفيذ';
+          if (value === 'pending') value = 'قيد التنفيذ';
+          if (value === 'active') value = 'نشط';
+          if (value === 'expired') value = 'منتهي';
+          if (value === 'vacant') value = 'شاغر';
+          if (value === 'occupied') value = 'مأهول';
+          if (value === 'confirmed') value = 'مؤكد';
+          if (value === 'cancelled') value = 'ملغي';
+
+          row[field.label] = value ?? '';
+        });
+        return row;
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(exportData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Sheet1");
+      const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+      const dataBlob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8' });
+      saveAs(dataBlob, `${filename}_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+      toast.success('تم تصدير البيانات بنجاح كملف Excel');
+    } catch (error) {
+      console.error(error);
+      toast.error('حدث خطأ أثناء تصدير البيانات');
+    }
+  };
 
   const NAV_ITEMS = [
     { id: 'dashboard', label: 'لوحة التحكم', icon: LayoutDashboard },
@@ -3418,14 +6469,15 @@ function AppContent() {
     { id: 'تكرار الطلبات', label: 'تكرار الطلبات', icon: Repeat },
     { id: 'staff', label: 'إدارة العمالة', icon: UserIcon },
     { id: 'club-subscriptions', label: 'اشتراكات النادي', icon: ListTodo },
+    { id: 'game-room-bookings', label: 'حجز غرفة الألعاب', icon: Gamepad2 },
     { id: 'bookings', label: 'إدارة الحجوزات', icon: Calendar },
     { id: 'طلبات الماء', label: 'إدارة المياه والمخزون', icon: Droplets },
     { id: 'طلبات الصيانة', label: 'طلبات الصيانة', icon: Wrench },
     ...BUILDINGS.map(b => ({ id: b, label: b, icon: Home })),
     { id: 'تنظيف سيارات', label: 'تنظيف السيارات', icon: Car },
+    { id: 'car-subscriptions', label: 'اشتراكات السيارات', icon: CalendarPlus },
     { id: 'property-units', label: 'إدارة الوحدات', icon: Home },
     { id: 'tenants', label: 'العقود', icon: FileCheck },
-    { id: 'property-alerts', label: 'تنبيهات العقود', icon: Bell },
     { id: 'users', label: 'إدارة المستخدمين', icon: Users },
     { id: 'settings', label: 'إعدادات الهوية', icon: Settings }
   ].filter(item => {
@@ -3481,6 +6533,8 @@ function AppContent() {
         if (data.background) setAppBackground(data.background);
         if (data.bgOpacity !== undefined) setBgOpacity(data.bgOpacity);
         if (data.themeColor) setThemeColor(data.themeColor);
+        if (data.adminPhone !== undefined) setAdminPhone(data.adminPhone);
+        if (data.whatsappGroupLink !== undefined) setWhatsappGroupLink(data.whatsappGroupLink);
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'settings/branding');
@@ -3508,25 +6562,11 @@ function AppContent() {
     };
   }, [user]);
 
-  useEffect(() => {
-    if (user && tenants.length > 0) {
-      const expiring = getExpiringContracts(30);
-      if (expiring.length > 0) {
-        toast.error(`تنبيه العقود: يوجد ${expiring.length} عقد منتهي أو يقترب من الانتهاء`, {
-          description: 'يرجى مراجعة قسم تنبيهات العقود لاتخاذ الإجراءات اللازمة.',
-          duration: 8000,
-          action: {
-            label: 'عرض التنبيهات',
-            onClick: () => setActiveTab('property-alerts')
-          },
-        });
-      }
-    }
-  }, [user, tenants.length > 0]);
 
-  const updateBranding = async (name: string, logo: string | null, background: string | null, color: string, opacity: number) => {
+
+  const updateBranding = async (name: string, logo: string | null, background: string | null, color: string, opacity: number, phoneStr: string, groupLinkStr: string) => {
     try {
-      await setDoc(doc(db, 'settings', 'branding'), { name, logo, background, themeColor: color, bgOpacity: opacity }, { merge: true });
+      await setDoc(doc(db, 'settings', 'branding'), { name, logo, background, themeColor: color, bgOpacity: opacity, adminPhone: phoneStr, whatsappGroupLink: groupLinkStr }, { merge: true });
       toast.success('تم تحديث الهوية بنجاح');
       setIsBrandingModalOpen(false);
     } catch (error) {
@@ -3601,6 +6641,22 @@ function AppContent() {
     }
   };
 
+  const saveGameRoomBooking = async (data: any) => {
+    try {
+      if (editingGameRoomBooking) {
+        await updateDoc(doc(db, 'bookings', editingGameRoomBooking.id), data);
+        toast.success('تم تحديث الحجز بنجاح');
+      } else {
+        await addDoc(collection(db, 'bookings'), data);
+        toast.success('تم إضافة الحجز بنجاح');
+      }
+      setIsGameRoomModalOpen(false);
+      setEditingGameRoomBooking(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'bookings');
+    }
+  };
+
   const deleteBooking = async (bookingId: string) => {
     try {
       await deleteDoc(doc(db, 'bookings', bookingId));
@@ -3614,20 +6670,36 @@ function AppContent() {
     try {
       const sub = clubSubscriptions.find(s => s.id === id);
       const updateData: any = { paymentStatus };
-      if (paymentStatus === 'paid' && sub) {
+      const isPaidStatus = paymentStatus === 'paid';
+      if (isPaidStatus && sub) {
         updateData.collectedAmount = sub.totalPrice;
+        updateData.paymentDate = Timestamp.now();
       } else if (paymentStatus === 'unpaid') {
         updateData.collectedAmount = 0;
+        updateData.paymentDate = null;
       }
       await updateDoc(doc(db, 'clubSubscriptions', id), updateData);
       toast.success(paymentStatus === 'paid' ? 'تم تحصيل المبلغ بنجاح' : 'تم إلغاء التحصيل');
+
+      if (sub) {
+        const statusTxt = isPaidStatus ? '✅ تم التحصيل' : '❌ ملغى / غير مدفوع';
+        const collectMsg = `*تحديث دفع اشتراك النادي الرياضي 🏋️‍♂️💸*\n\n` +
+          `• *المشترك:* ${sub.name}\n` +
+          `• *رقم الجوال:* ${sub.phone || 'غير محدد'}\n` +
+          `• *المدة:* ${sub.monthsCount} أشهر\n` +
+          `• *قيمة الاشتراك:* ${sub.totalPrice} ريال\n` +
+          `• *حالة الدفع:* ${statusTxt}\n` +
+          (isPaidStatus ? `• *تاريخ التحصيل:* ${format(new Date(), 'yyyy/MM/dd - hh:mm a')}\n` : '') +
+          `\n• *مجموعة تتبع دفعات الخدمة والدعم وتأكيد الحالة (واتساب) 👇:* \n${whatsappGroupLink || 'https://chat.whatsapp.com/GiYTHd978eMJ3o2oEDb2JC'}`;
+          
+        window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(collectMsg)}`, '_blank');
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `clubSubscriptions/${id}`);
     }
   };
 
   const deleteClubSubscription = async (id: string) => {
-    if (!window.confirm('هل أنت متأكد من حذف هذا الاشتراك؟')) return;
     try {
       await deleteDoc(doc(db, 'clubSubscriptions', id));
       toast.success('تم حذف الاشتراك بنجاح');
@@ -3843,6 +6915,11 @@ function AppContent() {
     },
   });
 
+  const handlePrintClubSub = useReactToPrint({
+    contentRef: clubSubscriptionFormRef,
+    onAfterPrint: () => setSelectedClubSubForPrint(null),
+  });
+
   useEffect(() => {
     if (selectedRequest) {
       // Small delay to ensure the Invoice component is rendered and QR code is generated
@@ -3909,6 +6986,32 @@ function AppContent() {
       return () => clearTimeout(timer);
     }
   }, [isPrintingBulk, handlePrintBulk]);
+
+  useEffect(() => {
+    let active = true;
+    let retryCount = 0;
+
+    if (selectedClubSubForPrint) {
+      const checkAndPrint = () => {
+        if (!active) return;
+        if (clubSubscriptionFormRef.current) {
+          handlePrintClubSub();
+        } else if (retryCount < 10) {
+          retryCount++;
+          setTimeout(checkAndPrint, 100);
+        } else {
+          setSelectedClubSubForPrint(null);
+          toast.error('حدث خطأ أثناء تهيئة نموذج الطباعة. يرجى المحاولة مرة أخرى.');
+        }
+      };
+
+      const timer = setTimeout(checkAndPrint, 250);
+      return () => {
+        active = false;
+        clearTimeout(timer);
+      };
+    }
+  }, [selectedClubSubForPrint, handlePrintClubSub]);
 
   const calendarDays = React.useMemo(() => {
     const start = startOfWeek(startOfMonth(selectedMonth));
@@ -4519,6 +7622,110 @@ function AppContent() {
     e.target.value = '';
   };
 
+  const handleImportRequests = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const dataBuffer = event.target?.result;
+        const wb = XLSX.read(dataBuffer, { type: 'array' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws) as any[];
+
+        toast.loading('جاري استيراد الطلبات...');
+
+        let importedCount = 0;
+        let errorCount = 0;
+
+        for (const row of data) {
+          try {
+            const apartmentNumber = String(row['رقم الشقة'] || row['الشقة'] || row['Apartment Number'] || row['Apartment'] || '').trim();
+            const buildingName = String(row['اسم المبنى'] || row['المبنى'] || row['Building Name'] || row['Building'] || '').trim();
+            const serviceType = String(row['الخدمة'] || row['نوع الخدمة'] || row['Service Type'] || row['Service'] || '').trim();
+            
+            let dateVal = row['التاريخ'] || row['Date'] || '';
+            let date = Timestamp.now();
+            if (dateVal) {
+              if (typeof dateVal === 'number') {
+                const dateObj = new Date((dateVal - 25569) * 86400 * 1000);
+                date = Timestamp.fromDate(dateObj);
+              } else {
+                const parsedDate = new Date(dateVal);
+                if (!isNaN(parsedDate.getTime())) {
+                  date = Timestamp.fromDate(parsedDate);
+                } else if (typeof dateVal === 'string' && dateVal.includes('/')) {
+                  const parts = dateVal.split('/');
+                  if (parts.length === 3) {
+                    const d = parseInt(parts[0], 10);
+                    const m = parseInt(parts[1], 10) - 1;
+                    const y = parseInt(parts[2], 10);
+                    const parsed = new Date(y, m, d);
+                    if (!isNaN(parsed.getTime())) date = Timestamp.fromDate(parsed);
+                  }
+                }
+              }
+            }
+
+            const price = Number(row['السعر'] || row['المبلغ'] || row['Price'] || row['Amount'] || 0);
+            const monthsCount = Number(row['عدد الأشهر'] || row['العدد'] || row['Months Count'] || 1);
+            const notes = String(row['ملاحظات'] || row['Notes'] || '').trim();
+            const workerName = String(row['اسم العامل'] || row['Worker Name'] || row['Worker'] || '').trim();
+            
+            const rawStatus = String(row['الحالة'] || row['Status'] || '').trim();
+            const status = (rawStatus === 'منفذة ' || rawStatus === 'منفذ' || rawStatus === 'تم التنفيذ' || rawStatus.toLowerCase() === 'completed') ? 'completed' : 'pending';
+
+            const rawPaymentStatus = String(row['حالة الدفع'] || row['Payment Status'] || '').trim();
+            const paymentStatus = (rawPaymentStatus === 'تم الدفع' || rawPaymentStatus === 'مدفوع' || rawPaymentStatus.toLowerCase() === 'paid') ? 'paid' : 'unpaid';
+
+            if (!apartmentNumber || !serviceType) {
+              errorCount++;
+              continue;
+            }
+
+            await addDoc(collection(db, 'requests'), {
+              apartmentNumber,
+              buildingName,
+              serviceType,
+              date,
+              price,
+              monthsCount,
+              notes,
+              workerName,
+              status,
+              paymentStatus,
+              userId: user?.uid || 'anonymous',
+              createdAt: Timestamp.now()
+            });
+
+            importedCount++;
+          } catch (err) {
+            console.error('Error importing request:', row, err);
+            errorCount++;
+          }
+        }
+
+        toast.dismiss();
+        if (importedCount > 0) {
+          toast.success(`تم استيراد ${importedCount} طلب بنجاح`);
+        } else {
+          toast.info('لم يتم العثور على بيانات صالحة للاستيراد');
+        }
+        if (errorCount > 0) {
+          toast.error(`فشل استيراد ${errorCount} سجل. تأكد من صحة الأعمدة.`);
+        }
+      } catch (error) {
+        console.error(error);
+        toast.dismiss();
+        toast.error('حدث خطأ أثناء استيراد البيانات');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  };
+
   const downloadApartmentTemplate = () => {
     const template = [
       {
@@ -4561,6 +7768,481 @@ function AppContent() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Template");
     XLSX.writeFile(wb, "tenants_template.xlsx");
+  };
+
+  const importCarSubscriptionsFromImage = async () => {
+    const loadingId = toast.loading('جاري استيراد اشتراكات غسيل السيارات من الصورة...');
+    try {
+      const CAR_IMAGE_DATA = [
+        {
+          apartmentNumber: "23-28029",
+          apartment: "134",
+          car: "toyota prado",
+          startDate: "2026-01-01",
+          workerName: "سيف ، عبدالله",
+          price: 600,
+          monthsCount: 3,
+          schedule: [2, 5],
+        },
+        {
+          apartmentNumber: "5901- AVR",
+          apartment: "522",
+          car: "Jetour T2",
+          startDate: "2026-04-01",
+          workerName: "قلم ، شميم",
+          price: 600,
+          monthsCount: 3,
+          schedule: [0, 4],
+        },
+        {
+          apartmentNumber: "TTU-77",
+          apartment: "327",
+          car: "jeep wrangler",
+          startDate: "2026-03-01",
+          workerName: "عراف وعارفور",
+          price: 600,
+          monthsCount: 3,
+          schedule: [3, 6],
+        },
+        {
+          apartmentNumber: "AJS-20",
+          apartment: "327",
+          car: "Range rover",
+          startDate: "2026-03-01",
+          workerName: "عراف وعارفور",
+          price: 600,
+          monthsCount: 3,
+          schedule: [3, 6],
+        },
+        {
+          apartmentNumber: "LTR-3100",
+          apartment: "517",
+          car: "kiea stranger",
+          startDate: "2026-01-01",
+          workerName: "قلم ، شميم",
+          price: 300,
+          monthsCount: 2,
+          schedule: [0, 4],
+        },
+        {
+          apartmentNumber: "1724 VJD",
+          apartment: "422",
+          car: "Merceds",
+          startDate: "2026-03-02",
+          workerName: "منصور، شهاب",
+          price: 400,
+          monthsCount: 2,
+          schedule: [3, 6],
+        },
+        {
+          apartmentNumber: "klr-7132",
+          apartment: "313",
+          car: "geely white",
+          startDate: "2026-05-01",
+          workerName: "عراف وعارفور",
+          price: 300,
+          monthsCount: 2,
+          schedule: [2, 6],
+        },
+        {
+          apartmentNumber: "htr 1729",
+          apartment: "227",
+          car: "audi s3",
+          startDate: "2026-04-01",
+          workerName: "شوهاد، حسن",
+          price: 300,
+          monthsCount: 2,
+          schedule: [2, 6],
+        },
+        {
+          apartmentNumber: "tgr-1078",
+          apartment: "217",
+          car: "nissan patrol",
+          startDate: "2026-04-01",
+          workerName: "شوهاد، حسن",
+          price: 600,
+          monthsCount: 3,
+          schedule: [0, 3],
+        },
+        {
+          apartmentNumber: "Bahrain",
+          apartment: "204",
+          car: "nissan patrol",
+          startDate: "2026-06-01",
+          workerName: "شوهاد، حسن",
+          price: 600,
+          monthsCount: 3,
+          schedule: [2, 6],
+        },
+        {
+          apartmentNumber: "LDE 151",
+          apartment: "135",
+          car: "BMW",
+          startDate: "2026-07-01",
+          workerName: "سيف ، عبدالله",
+          price: 450,
+          monthsCount: 3,
+          schedule: [3, 6],
+        },
+        {
+          apartmentNumber: "GSR 1846",
+          apartment: "135",
+          car: "FORD TERRITOR",
+          startDate: "2026-07-01",
+          workerName: "سيف ، عبدالله",
+          price: 600,
+          monthsCount: 3,
+          schedule: [3, 6],
+        },
+        {
+          apartmentNumber: "ajs-3315",
+          apartment: "407",
+          car: "toyota",
+          startDate: "2026-06-01",
+          workerName: "منصور، شهاب",
+          price: 400,
+          monthsCount: 2,
+          schedule: [2, 6],
+        },
+        {
+          apartmentNumber: "no. 683163",
+          apartment: "219",
+          car: "Nissan extrail",
+          startDate: "2026-08-01",
+          workerName: "شوهاد، حسن",
+          price: 700,
+          monthsCount: 4,
+          schedule: [1, 4],
+        },
+        {
+          apartmentNumber: "lvd-1290",
+          apartment: "224",
+          car: "lexus es",
+          startDate: "2026-10-01",
+          workerName: "شوهاد، حسن",
+          price: 450,
+          monthsCount: 3,
+          schedule: [3, 6],
+        },
+        {
+          apartmentNumber: "بدون لوحة - 403",
+          apartment: "403",
+          car: "alfa romio",
+          startDate: "2026-01-17",
+          workerName: "منصور، شهاب",
+          price: 600,
+          monthsCount: 3,
+          schedule: [1, 4],
+        },
+        {
+          apartmentNumber: "THD - 2660",
+          apartment: "316",
+          car: "mini coper",
+          startDate: "2026-12-01",
+          workerName: "عراف وعارفور",
+          price: 600,
+          monthsCount: 4,
+          schedule: [2, 6],
+        },
+        {
+          apartmentNumber: "lkr-5466",
+          apartment: "526",
+          car: "genss- gray",
+          startDate: "2026-01-06",
+          workerName: "قلم ، شميم",
+          price: 450,
+          monthsCount: 3,
+          schedule: [2, 5],
+        },
+        {
+          apartmentNumber: "5509 BZD",
+          apartment: "425",
+          car: "merceds suv",
+          startDate: "2026-01-13",
+          workerName: "منصور، شهاب",
+          price: 400,
+          monthsCount: 2,
+          schedule: [2, 6],
+        },
+        {
+          apartmentNumber: "tkr-6545",
+          apartment: "424",
+          car: "nissan",
+          startDate: "2026-01-19",
+          workerName: "منصور، شهاب",
+          price: 400,
+          monthsCount: 4,
+          schedule: [1],
+        },
+        {
+          apartmentNumber: "68217",
+          apartment: "411",
+          car: "أبو ظبي tandra",
+          startDate: "2026-01-21",
+          workerName: "منصور، شهاب",
+          price: 200,
+          monthsCount: 1,
+          schedule: [0, 3],
+        },
+        {
+          apartmentNumber: "ksr-7171",
+          apartment: "233",
+          car: "defender",
+          startDate: "2026-01-21",
+          workerName: "شوهاد، حسن",
+          price: 520,
+          monthsCount: 1,
+          schedule: [1, 2, 3, 4, 5],
+        },
+        {
+          apartmentNumber: "DAR-5454",
+          apartment: "322",
+          car: "merceds cope",
+          startDate: "2026-01-26",
+          workerName: "عراف وعارفور",
+          price: 600,
+          monthsCount: 4,
+          schedule: [2, 5],
+        },
+        {
+          apartmentNumber: "ahd-5570",
+          apartment: "1110",
+          car: "porche",
+          startDate: "2026-01-31",
+          workerName: "شاهين، عبدالله",
+          price: 600,
+          monthsCount: 3,
+          schedule: [0, 3],
+        },
+        {
+          apartmentNumber: "BDR-5197",
+          apartment: "1110",
+          car: "toress",
+          startDate: "2026-01-31",
+          workerName: "شاهين، عبدالله",
+          price: 450,
+          monthsCount: 3,
+          schedule: [0, 3],
+        },
+        {
+          apartmentNumber: "NXR 3612",
+          apartment: "419",
+          car: "FORD TERRITOR",
+          startDate: "2026-02-24",
+          workerName: "منصور، شهاب",
+          price: 400,
+          monthsCount: 2,
+          schedule: [2, 6],
+        },
+        {
+          apartmentNumber: "NZR 5978",
+          apartment: "125",
+          car: "Jetour",
+          startDate: "2026-02-25",
+          workerName: "سيف ، عبدالله",
+          price: 400,
+          monthsCount: 2,
+          schedule: [3, 6],
+        },
+        {
+          apartmentNumber: "قطر proche",
+          apartment: "107",
+          car: "proche",
+          startDate: "2026-03-07",
+          workerName: "سيف ، عبدالله",
+          price: 400,
+          monthsCount: 2,
+          schedule: [2, 6],
+        },
+        {
+          apartmentNumber: "بدون لوحة - 106",
+          apartment: "106",
+          car: "lexus es",
+          startDate: "2026-04-07",
+          workerName: "سيف ، عبدالله",
+          price: 150,
+          monthsCount: 1,
+          schedule: [2, 6],
+        },
+        {
+          apartmentNumber: "٢٣٤٨ س د ل",
+          apartment: "106",
+          car: "Jeep 212",
+          startDate: "2026-04-26",
+          workerName: "سيف ، عبدالله",
+          price: 200,
+          monthsCount: 1,
+          schedule: [0, 3],
+        }
+      ];
+
+      let importedCount = 0;
+      for (const item of CAR_IMAGE_DATA) {
+        const alreadyExists = requests.some(r => 
+          r.serviceType === 'تنظيف سيارات' && 
+          r.isSubscription && 
+          r.apartmentNumber === item.apartmentNumber &&
+          (r.notes || '').includes(item.car)
+        );
+
+        if (alreadyExists) continue;
+
+        const start = new Date(item.startDate);
+        const end = addMonths(start, item.monthsCount);
+
+        const docData = {
+          serviceType: 'تنظيف سيارات',
+          apartmentNumber: item.apartmentNumber,
+          apartment: item.apartment,
+          car: item.car,
+          price: item.price,
+          date: Timestamp.fromDate(start),
+          subscriptionStartDate: Timestamp.fromDate(start),
+          subscriptionEndDate: Timestamp.fromDate(end),
+          subscriptionSchedule: item.schedule,
+          subscriptionFrequency: 'weekly',
+          monthsCount: item.monthsCount,
+          isSubscription: true,
+          workerName: item.workerName,
+          notes: `السيارة: ${item.car} | الشقة: ${item.apartment}`,
+          userId: user?.uid || 'anonymous',
+          createdAt: Timestamp.now(),
+          status: 'completed',
+          paymentStatus: 'paid',
+          buildingName: 'نظافة سيارات'
+        };
+
+        await addDoc(collection(db, 'requests'), docData);
+        importedCount++;
+      }
+
+      toast.dismiss(loadingId);
+      if (importedCount > 0) {
+        toast.success(`تم استيراد ${importedCount} اشتراك سيارة بنجاح`);
+      } else {
+        toast.info('جميع الاشتراكات موجودة مسبقاً في النظام');
+      }
+    } catch (err) {
+      console.error(err);
+      toast.dismiss(loadingId);
+      toast.error('حدث خطأ أثناء استيراد اشتراكات الصورة');
+    }
+  };
+
+  const handleUploadAndAnalyzeImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const loadingId = toast.loading('جاري رفع وتحليل الصورة بواسطة الذكاء الاصطناعي... يرجى الانتظار');
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const base64String = reader.result as string;
+          
+          const response = await fetch('/api/gemini/analyze-image', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              image: base64String,
+              mimeType: file.type
+            })
+          });
+
+          const contentType = response.headers.get('content-type') || '';
+          if (contentType.includes('text/html')) {
+            const htmlText = await response.text();
+            console.error('Received HTML instead of JSON. Snippet:', htmlText.substring(0, 300));
+            // Try to extract an error from the HTML if it's an Express/Vite error page
+            const match = htmlText.match(/<pre>(.*?)<\/pre>/s) || htmlText.match(/<title>(.*?)<\/title>/s);
+            const errorInHtml = match ? match[1].replace(/<[^>]*>/g, '').trim() : '';
+            throw new Error(`استجابة غير صالحة من السيرفر (HTML). رمز الحالة: ${response.status}${errorInHtml ? ` - الخطأ: ${errorInHtml.substring(0, 100)}` : ''}`);
+          }
+
+          if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.error || `خطأ من السيرفر: ${response.status}`);
+          }
+
+          const { data } = await response.json();
+          if (!data || !Array.isArray(data)) {
+            throw new Error('لم يتمكن الذكاء الاصطناعي من استخراج الاشتراكات من هذه الصورة بشكل صحيح.');
+          }
+
+          if (data.length === 0) {
+            toast.dismiss(loadingId);
+            toast.warning('لم يتم العثور على أي بيانات اشتراكات سيارات في الصورة.');
+            return;
+          }
+
+          let importedCount = 0;
+          for (const item of data) {
+            const alreadyExists = requests.some(r => 
+              r.serviceType === 'تنظيف سيارات' && 
+              r.isSubscription && 
+              r.apartmentNumber === item.apartmentNumber &&
+              (r.notes || '').includes(item.car)
+            );
+
+            if (alreadyExists) continue;
+
+            const start = item.startDate ? new Date(item.startDate) : new Date();
+            const end = addMonths(start, item.monthsCount || 1);
+
+            const docData = {
+              serviceType: 'تنظيف سيارات',
+              apartmentNumber: item.apartmentNumber || 'بدون لوحة',
+              apartment: item.apartment || 'غير محدد',
+              car: item.car || 'غير محدد',
+              price: Number(item.price || 300),
+              date: Timestamp.fromDate(start),
+              subscriptionStartDate: Timestamp.fromDate(start),
+              subscriptionEndDate: Timestamp.fromDate(end),
+              subscriptionSchedule: item.schedule || [0, 3],
+              subscriptionFrequency: 'weekly',
+              monthsCount: Number(item.monthsCount || 1),
+              isSubscription: true,
+              workerName: item.workerName || 'غير معين',
+              notes: `السيارة: ${item.car || 'غير محدد'} | الشقة: ${item.apartment || 'غير محدد'}`,
+              userId: user?.uid || 'anonymous',
+              createdAt: Timestamp.now(),
+              status: 'completed',
+              paymentStatus: 'paid',
+              buildingName: 'نظافة سيارات'
+            };
+
+            await addDoc(collection(db, 'requests'), docData);
+            importedCount++;
+          }
+
+          toast.dismiss(loadingId);
+          if (importedCount > 0) {
+            toast.success(`تم بنجاح استخراج واستيراد ${importedCount} اشتراك سيارة من الصورة!`);
+          } else {
+            toast.info('جميع الاشتراكات الموجودة في الصورة مسجلة مسبقاً في النظام.');
+          }
+        } catch (innerErr: any) {
+          console.error(innerErr);
+          toast.dismiss(loadingId);
+          toast.error(`خطأ في تحليل الصورة: ${innerErr.message || innerErr}`);
+        }
+      };
+
+      reader.onerror = () => {
+        toast.dismiss(loadingId);
+        toast.error('حدث خطأ أثناء قراءة ملف الصورة من الجهاز.');
+      };
+
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      console.error(err);
+      toast.dismiss(loadingId);
+      toast.error('حدث خطأ في معالجة الملف.');
+    } finally {
+      e.target.value = '';
+    }
   };
 
   const handleAuth = async (e?: React.FormEvent) => {
@@ -4784,16 +8466,22 @@ function AppContent() {
           }
         }
 
-        const promises = dates.map((date: Timestamp) => 
-          addDoc(collection(db, 'requests'), {
+        const promises = dates.map((date: any) => {
+          const isRecurring = dates.length > 1;
+          const finalPrice = isRecurring && rest.unitPrice ? (rest.unitPrice * (rest.serviceType === 'توصيل مياه' ? (rest.waterGallons || 1) : 1)) : rest.price;
+          const finalMonthsCount = isRecurring ? 1 : rest.monthsCount; // keep the count per date
+
+          return addDoc(collection(db, 'requests'), {
             ...rest,
-            date,
+            date: date instanceof Timestamp ? date : Timestamp.fromDate(new Date(date)),
+            price: Number(finalPrice),
+            monthsCount: Number(finalMonthsCount),
             userId: user.uid,
             createdAt: rest.createdAt || Timestamp.now(),
             status: rest.status || 'pending',
             paymentStatus: 'unpaid'
-          })
-        );
+          });
+        });
         await Promise.all(promises);
         toast.success(dates.length > 1 ? `تم إضافة ${dates.length} طلبات بنجاح` : 'تم إضافة الطلب بنجاح');
       }
@@ -4852,15 +8540,163 @@ function AppContent() {
     }
   };
 
-  const updateStatus = async (id: string, field: 'status' | 'paymentStatus' | 'price', value: string | number) => {
+  const updateStatus = async (id: string, field: 'status' | 'paymentStatus' | 'price', value: string | number, skipWhatsApp = false) => {
     try {
       const requestRef = doc(db, 'requests', id);
-      await updateDoc(requestRef, { [field]: value });
+      const updateData: any = { [field]: value };
+      if (field === 'paymentStatus') {
+        if (value === 'paid') {
+          updateData.paymentDate = Timestamp.now();
+        } else {
+          updateData.paymentDate = null;
+        }
+      }
+      await updateDoc(requestRef, updateData);
       if (field !== 'price') {
         toast.success('تم تحديث الحالة بنجاح');
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `requests/${id}`);
+    }
+  };
+  
+  const toggleDailyCompletion = async (req: CleaningRequest, date: Date) => {
+    if (!req.isSubscription) {
+      const nextStatus = req.status === 'pending' ? 'completed' : 'pending';
+      return updateStatus(req.id, 'status', nextStatus);
+    }
+    
+    const dateStr = format(date, 'yyyy-MM-dd');
+    const currentCompleted = req.completedDates || [];
+    const isCompleted = currentCompleted.includes(dateStr);
+    
+    const newCompleted = isCompleted 
+      ? currentCompleted.filter(d => d !== dateStr)
+      : [...currentCompleted, dateStr];
+      
+    try {
+      await updateDoc(doc(db, 'requests', req.id), {
+        completedDates: newCompleted,
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      console.error(error);
+      toast.error('حدث خطأ أثناء تحديث حالة التنفيذ');
+    }
+  };
+
+  const duplicatePreviousMonthSchedule = async () => {
+    const prevMonth = subMonths(selectedMonth, 1);
+    const prevMonthRequests = requests.filter(req => isSameMonth(safeToDate(req.date), prevMonth));
+    
+    if (prevMonthRequests.length === 0) {
+      toast.error('لا توجد طلبات في الشهر السابق لنسخها');
+      return;
+    }
+
+    setConfirmDuplicatePrevMonth(true);
+  };
+
+  const executeDuplicatePreviousMonthSchedule = async () => {
+    const prevMonth = subMonths(selectedMonth, 1);
+    const prevMonthRequests = requests.filter(req => isSameMonth(safeToDate(req.date), prevMonth));
+    
+    if (prevMonthRequests.length === 0) return;
+
+    const loadingToast = toast.loading('جاري نسخ الجدول...');
+    
+    try {
+      const promises = prevMonthRequests.map(req => {
+        const sourceDate = safeToDate(req.date);
+        let targetDate = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth(), sourceDate.getDate());
+        
+        // Handle month day overflow
+        if (targetDate.getMonth() !== selectedMonth.getMonth()) {
+          targetDate = endOfMonth(selectedMonth);
+        }
+
+        // Keep the original time if possible
+        const hours = sourceDate.getHours();
+        const minutes = sourceDate.getMinutes();
+        targetDate.setHours(hours, minutes, 0, 0);
+
+        const { id, ...newReqData } = req;
+        return addDoc(collection(db, 'requests'), {
+          ...newReqData,
+          date: targetDate,
+          createdAt: serverTimestamp(),
+          status: 'pending',
+          paymentStatus: 'unpaid',
+          receiptUrl: null,
+          beforePhotoUrl: null,
+          afterPhotoUrl: null,
+          completedDates: [] // clear completion arrays for next month
+        });
+      });
+
+      await Promise.all(promises);
+      toast.success('تم نسخ الجدول بنجاح', { id: loadingToast });
+    } catch (error) {
+      console.error(error);
+      toast.error('حدث خطأ أثناء نسخ الجدول', { id: loadingToast });
+    }
+  };
+
+  const generateMonthlyList = async (targetDateString: string, sourceDateString: string | null, mode: 'blank' | 'copy') => {
+    const targetDate = new Date(targetDateString + '-01'); // e.g. '2026-07' -> '2026-07-01'
+    
+    if (mode === 'blank') {
+      // Just switch global view
+      setSelectedMonth(targetDate);
+      toast.success(`تم الانتقال إلى شهر ${format(targetDate, 'MMMM yyyy', { locale: ar })}. يمكنك البدء بإضافة طلبات جديدة.`);
+      return;
+    }
+
+    if (!sourceDateString) {
+      toast.error('يرجى تحديد الشهر المصدر للنسخ منه');
+      return;
+    }
+
+    const sourceDate = new Date(sourceDateString + '-01');
+    const sourceRequests = requests.filter(req => isSameMonth(safeToDate(req.date), sourceDate));
+
+    if (sourceRequests.length === 0) {
+      toast.error('لا توجد طلبات في الشهر المصدر لنسخها');
+      return;
+    }
+
+    const toastId = toast.loading('جاري إنشاء القائمة ونسخ المهام...');
+
+    try {
+      const promises = sourceRequests.map(req => {
+        const reqDate = safeToDate(req.date);
+        
+        let targetReqDate = new Date(targetDate.getFullYear(), targetDate.getMonth(), reqDate.getDate());
+        if (targetReqDate.getMonth() !== targetDate.getMonth()) {
+          targetReqDate = endOfMonth(targetDate);
+        }
+        targetReqDate.setHours(reqDate.getHours(), reqDate.getMinutes(), 0, 0);
+
+        const { id, ...newReqData } = req;
+        return addDoc(collection(db, 'requests'), {
+          ...newReqData,
+          date: targetReqDate,
+          createdAt: serverTimestamp(),
+          status: 'pending',
+          paymentStatus: 'unpaid',
+          receiptUrl: null,
+          beforePhotoUrl: null,
+          afterPhotoUrl: null,
+          completedDates: []
+        });
+      });
+
+      await Promise.all(promises);
+      setSelectedMonth(targetDate);
+      toast.success(`تم إنشاء قائمة جديدة لشهر ${format(targetDate, 'MMMM yyyy', { locale: ar })} ونسخ ${sourceRequests.length} طلب بنجاح!`, { id: toastId });
+    } catch (e) {
+      console.error(e);
+      toast.error('حدث خطأ أثناء نسخ وإنشاء القائمة', { id: toastId });
     }
   };
 
@@ -4919,6 +8755,13 @@ function AppContent() {
       setSelectedMonth(startOfMonth(globalSelectedDate));
     }
   }, [globalSelectedDate]);
+
+  // Sync globalSelectedDate with selectedMonth
+  React.useEffect(() => {
+    if (!isSameMonth(globalSelectedDate, selectedMonth)) {
+      setGlobalSelectedDate(startOfMonth(selectedMonth));
+    }
+  }, [selectedMonth]);
 
   const handleReceiptUpload = async (id: string, file: File) => {
     if (file.size > 800000) { // ~800KB limit for base64 in Firestore
@@ -5032,7 +8875,8 @@ function AppContent() {
     const matchesService = serviceFilter === 'all' || 
       activeTab === 'تنظيف سيارات' || 
       activeTab === 'طلبات الماء' ||
-      (serviceFilter === 'cars' ? req.serviceType === 'تنظيف سيارات' : req.serviceType !== 'تنظيف سيارات');
+      activeTab === 'طلبات الصيانة' ||
+      (serviceFilter === 'cars' ? req.serviceType === 'تنظيف سيارات' : req.serviceType !== 'تنظيف سيارات' && req.serviceType !== 'توصيل مياه');
     
     let matchesTab = activeTab === 'dashboard' || activeTab === 'daily-tasks';
     if (activeTab === 'تكرار الطلبات') {
@@ -5041,8 +8885,10 @@ function AppContent() {
       matchesTab = req.serviceType === 'تنظيف سيارات';
     } else if (activeTab === 'طلبات الماء') {
       matchesTab = req.serviceType === 'توصيل مياه';
+    } else if (activeTab === 'طلبات الصيانة') {
+      matchesTab = req.serviceType.includes('صيانة');
     } else if (BUILDINGS.includes(activeTab)) {
-      matchesTab = req.buildingName === activeTab;
+      matchesTab = req.buildingName === activeTab && req.serviceType !== 'توصيل مياه';
     }
 
     return matchesMonth && matchesSearch && matchesTab && matchesPayment && matchesService && matchesStatus;
@@ -5050,11 +8896,82 @@ function AppContent() {
 
   const [selectedHistoryGroup, setSelectedHistoryGroup] = useState<CleaningRequest[] | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
+  const [selectedSubscriptionDetail, setSelectedSubscriptionDetail] = useState<CleaningRequest | null>(null);
+
+  const groupedFilteredRequests = React.useMemo(() => {
+    const groups: Record<string, { 
+      latest: CleaningRequest, 
+      count: number, 
+      totalPrice: number, 
+      totalWaterGallons: number,
+      totalMonthsCount: number,
+      allCompleted: boolean, 
+      allPaid: boolean,
+      ids: string[]
+    }> = {};
+
+    filteredRequests.forEach(req => {
+      const reqDate = safeToDate(req.date);
+      const monthStr = format(reqDate, 'yyyy-MM');
+      const key = `${req.buildingName}-${req.apartmentNumber}-${req.serviceType}-${monthStr}`;
+      if (!groups[key]) {
+        groups[key] = {
+          latest: req,
+          count: 0,
+          totalPrice: 0,
+          totalWaterGallons: 0,
+          totalMonthsCount: 0,
+          allCompleted: true,
+          allPaid: true,
+          ids: []
+        };
+      }
+      
+      groups[key].count += 1;
+      groups[key].totalPrice += req.price;
+      groups[key].totalWaterGallons += (req.waterGallons || 0);
+      groups[key].totalMonthsCount += (req.monthsCount || 0);
+      groups[key].ids.push(req.id);
+      
+      if (req.status !== 'completed') groups[key].allCompleted = false;
+      if (req.paymentStatus !== 'paid') groups[key].allPaid = false;
+      
+      // Keep most recent as representative
+      if (safeToDate(req.date) > safeToDate(groups[key].latest.date)) {
+        groups[key].latest = req;
+      }
+    });
+
+    return Object.values(groups).sort((a, b) => safeToDate(b.latest.date).getTime() - safeToDate(a.latest.date).getTime());
+  }, [filteredRequests]);
+
+  const carCleaningDailyRequests = React.useMemo(() => {
+    return requests.filter(req => {
+      if (req.serviceType !== 'تنظيف سيارات') return false;
+      
+      const reqDate = safeToDate(req.date);
+      if (req.isSubscription) {
+        const start = safeToDate(req.subscriptionStartDate || req.date);
+        const end = safeToDate(req.subscriptionEndDate);
+        const dayOfWeek = globalSelectedDate.getDay();
+        
+        const checkDate = new Date(globalSelectedDate.getFullYear(), globalSelectedDate.getMonth(), globalSelectedDate.getDate());
+        const startDate = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+        const endDate = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+        
+        return checkDate >= startDate && checkDate <= endDate && (req.subscriptionSchedule?.includes(dayOfWeek));
+      }
+      
+      return isSameDay(reqDate, globalSelectedDate);
+    }).sort((a, b) => safeToDate(a.date).getTime() - safeToDate(b.date).getTime());
+  }, [requests, globalSelectedDate]);
 
   const groupedRequests = React.useMemo(() => {
     const groups: Record<string, CleaningRequest[]> = {};
     filteredRequests.forEach(req => {
-      const key = `${req.buildingName}-${req.apartmentNumber}-${req.serviceType}`;
+      const reqDate = safeToDate(req.date);
+      const monthStr = format(reqDate, 'yyyy-MM');
+      const key = `${req.buildingName}-${req.apartmentNumber}-${req.serviceType}-${monthStr}`;
       if (!groups[key]) groups[key] = [];
       groups[key].push(req);
     });
@@ -5063,20 +8980,20 @@ function AppContent() {
 
   const stats = {
     total: requests.filter(r => isSameMonth(safeToDate(r.date), selectedMonth)).length + 
-           clubSubscriptions.filter(s => isSameMonth(safeToDate(s.createdAt), selectedMonth)).length,
-    paid: requests.filter(r => isSameMonth(safeToDate(r.date), selectedMonth) && r.paymentStatus === 'paid').reduce((s, r) => s + r.price, 0) +
-          clubSubscriptions.filter(s => isSameMonth(safeToDate(s.createdAt), selectedMonth) && s.paymentStatus === 'paid').reduce((sum, s) => sum + s.totalPrice, 0),
+           clubSubscriptions.filter(s => isSameMonth(safeToDate(s.startDate || s.createdAt), selectedMonth)).length,
+    paid: requests.filter(r => r.paymentStatus === 'paid' && isSameMonth(safeToDate(r.paymentDate || r.date), selectedMonth)).reduce((s, r) => s + Number(r.price || 0), 0) +
+          clubSubscriptions.filter(s => s.paymentStatus === 'paid' && isSameMonth(safeToDate(s.paymentDate || s.startDate || s.createdAt), selectedMonth)).reduce((sum, s) => sum + Number(s.collectedAmount || s.totalPrice || 0), 0),
     totalMonthly: requests.filter(r => isSameMonth(safeToDate(r.date), selectedMonth)).length +
-                  clubSubscriptions.filter(s => isSameMonth(safeToDate(s.createdAt), selectedMonth)).length,
-    unpaid: requests.filter(r => isSameMonth(safeToDate(r.date), selectedMonth) && r.paymentStatus === 'unpaid').reduce((s, r) => s + r.price, 0) +
-            clubSubscriptions.filter(s => isSameMonth(safeToDate(s.createdAt), selectedMonth) && s.paymentStatus === 'unpaid').reduce((sum, s) => sum + s.totalPrice, 0),
+                  clubSubscriptions.filter(s => isSameMonth(safeToDate(s.startDate || s.createdAt), selectedMonth)).length,
+    unpaid: requests.filter(r => isSameMonth(safeToDate(r.date), selectedMonth) && r.paymentStatus === 'unpaid').reduce((s, r) => s + Number(r.price || 0), 0) +
+            clubSubscriptions.filter(s => isSameMonth(safeToDate(s.startDate || s.createdAt), selectedMonth) && s.paymentStatus === 'unpaid').reduce((sum, s) => sum + Number(s.totalPrice - (s.collectedAmount || 0)), 0),
     unpaidCount: requests.filter(r => isSameMonth(safeToDate(r.date), selectedMonth) && r.paymentStatus === 'unpaid').length +
-                 clubSubscriptions.filter(s => isSameMonth(safeToDate(s.createdAt), selectedMonth) && s.paymentStatus === 'unpaid').length,
+                 clubSubscriptions.filter(s => isSameMonth(safeToDate(s.startDate || s.createdAt), selectedMonth) && s.paymentStatus === 'unpaid').length,
     unpaidApartments: requests.filter(r => isSameMonth(safeToDate(r.date), selectedMonth) && r.paymentStatus === 'unpaid' && r.serviceType !== 'تنظيف سيارات').length,
     unpaidCars: requests.filter(r => isSameMonth(safeToDate(r.date), selectedMonth) && r.paymentStatus === 'unpaid' && r.serviceType === 'تنظيف سيارات').length,
     completed: requests.filter(r => isSameMonth(safeToDate(r.date), selectedMonth) && r.status === 'completed').length,
-    paidCount: requests.filter(r => isSameMonth(safeToDate(r.date), selectedMonth) && r.paymentStatus === 'paid').length +
-               clubSubscriptions.filter(s => isSameMonth(safeToDate(s.createdAt), selectedMonth) && s.paymentStatus === 'paid').length,
+    paidCount: requests.filter(r => r.paymentStatus === 'paid' && isSameMonth(safeToDate(r.paymentDate || r.date), selectedMonth)).length +
+               clubSubscriptions.filter(s => s.paymentStatus === 'paid' && isSameMonth(safeToDate(s.paymentDate || s.startDate || s.createdAt), selectedMonth)).length,
     pending: requests.filter(r => isSameMonth(safeToDate(r.date), selectedMonth) && r.status === 'pending').length,
     recurring: requests.filter(r => isSameMonth(safeToDate(r.date), selectedMonth) && r.isRecurring).length,
   };
@@ -5122,13 +9039,21 @@ function AppContent() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('view') === 'book') {
+    const viewParam = params.get('view');
+    if (viewParam === 'book') {
+      setPublicView('book');
       setIsPublicBookingView(true);
+    } else if (viewParam === 'renew-club') {
+      setPublicView('renew-club');
+      setRenewalSubId(params.get('subId'));
     }
   }, []);
 
-  if (isPublicBookingView) {
+  if (publicView === 'book') {
     return <PublicBookingForm appName={appName} logo={appLogo} />;
+  }
+  if (publicView === 'renew-club') {
+    return <PublicClubRenewalForm appName={appName} logo={appLogo} subId={renewalSubId} />;
   }
 
   if (loading) {
@@ -5320,14 +9245,14 @@ function AppContent() {
           
           <nav className="flex-1 overflow-y-auto p-6 space-y-3 custom-scrollbar">
           {NAV_ITEMS.map((item) => {
-            const isAlertTab = item.id === 'property-alerts';
+            const isAlertTab = item.id === 'tenants';
             const alertCount = isAlertTab ? getExpiringContracts(30).length : 0;
             
             return (
               <motion.button
                 key={item.id}
-                whileHover={{ x: -8, scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
+                whileHover={{ x: -6, y: -2, scale: 1.015 }}
+                whileTap={{ y: 2, scale: 0.985 }}
                 onClick={() => {
                   if (item.id === 'settings') {
                     setIsBrandingModalOpen(true);
@@ -5336,20 +9261,22 @@ function AppContent() {
                   }
                 }}
                 className={cn(
-                  "w-full flex items-center justify-between px-5 py-4 rounded-[1.5rem] font-cairo font-bold text-sm transition-all duration-300",
+                  "w-full flex items-center justify-between px-5 py-4 rounded-[1.5rem] font-cairo font-bold text-sm transition-all duration-150 cursor-pointer relative",
                   activeTab === item.id
-                    ? "bg-primary text-white shadow-xl shadow-primary/20 dark:shadow-none"
-                    : "text-gray-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-primary dark:hover:text-primary hover:shadow-md"
+                    ? "bg-gradient-to-b from-primary to-primary-dark text-white border-t border-t-white/30 border-x border-x-white/10 border-b-[5px] border-b-primary-dark shadow-[0_8px_16px_rgba(0,0,0,0.18)]"
+                    : "bg-white dark:bg-slate-900/60 text-slate-600 dark:text-slate-400 border border-slate-200/80 dark:border-slate-800/85 border-b-[4px] border-b-slate-250 dark:border-b-slate-950 shadow-[0_4px_6px_-2px_rgba(0,0,0,0.04)] hover:bg-slate-50/80 dark:hover:bg-slate-850/60 hover:text-primary dark:hover:text-primary hover:border-b-[5px]"
                 )}
               >
                 <div className="flex items-center gap-4">
-                  <item.icon size={22} />
+                  <item.icon size={22} className={cn(activeTab === item.id ? "text-white" : "text-slate-400 dark:text-slate-500 group-hover:text-primary")} />
                   <span>{item.label}</span>
                 </div>
                 {alertCount > 0 && (
                   <span className={cn(
-                    "w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black",
-                    activeTab === item.id ? "bg-white text-primary" : "bg-rose-500 text-white"
+                    "w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black border-b-[2px]",
+                    activeTab === item.id 
+                      ? "bg-white text-primary border-b-slate-200" 
+                      : "bg-rose-500 text-white border-b-rose-700"
                   )}>
                     {alertCount}
                   </span>
@@ -5360,42 +9287,31 @@ function AppContent() {
           </nav>
           
           <div className="p-6 border-t dark:border-slate-800">
-            <div className="bg-slate-100/50 dark:bg-slate-800/50 backdrop-blur-sm p-5 rounded-[2rem] border border-white/20 dark:border-slate-800 shadow-sm">
+            <div className="bg-slate-100/60 dark:bg-slate-950/40 p-5 rounded-[2rem] border border-slate-200/80 dark:border-slate-800/85 border-b-[5px] border-b-slate-300 dark:border-b-slate-950/90 shadow-[0_8px_16px_-4px_rgba(0,0,0,0.06)]">
               <div className="flex items-center justify-between mb-5">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-2xl bg-primary flex items-center justify-center text-white font-black text-lg shadow-xl shadow-primary/20">
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-b from-primary to-primary-dark flex items-center justify-center text-white font-black text-lg border-t border-t-white/20 border-b-[4px] border-b-primary-dark shadow-lg shadow-black/10">
                     {user.displayName?.[0] || 'U'}
                   </div>
                   <div className="text-right">
                     <p className="font-cairo font-black text-sm text-gray-900 dark:text-white leading-tight">{user.displayName}</p>
-                    <p className="font-cairo font-bold text-[10px] text-gray-500 dark:text-slate-400 mt-1">{isAdmin ? 'مسؤول النظام' : 'مستخدم'}</p>
+                    <p className="font-cairo font-bold text-[10px] text-gray-400 dark:text-slate-500 mt-1">{isAdmin ? 'مسؤول النظام' : 'مستخدم'}</p>
                   </div>
                 </div>
               </div>
               
               <div className="space-y-3">
-                <div className="flex items-center justify-between p-4 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border dark:border-slate-700">
-                  <div className="theme-switch-wrapper">
-                    <label className="theme-switch" htmlFor="sidebar-checkbox">
-                      <input 
-                        type="checkbox" 
-                        id="sidebar-checkbox" 
-                        checked={isDarkMode}
-                        onChange={() => setIsDarkMode(!isDarkMode)}
-                      />
-                      <div className="slider round"></div>
-                    </label>
-                    <em className="text-xs font-black text-gray-900 dark:text-white not-italic">الوضع الداكن</em>
-                  </div>
-                </div>
 
-                <button 
+
+                <motion.button 
+                  whileHover={{ scale: 1.02, y: -1 }}
+                  whileTap={{ scale: 0.98, y: 1 }}
                   onClick={logout}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-rose-500 font-bold text-xs hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-all"
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 border border-rose-100/60 dark:border-rose-900/35 border-b-[3px] border-b-rose-200 dark:border-b-rose-950/70 hover:bg-rose-100/40 dark:hover:bg-rose-900/30 font-bold text-xs hover:border-b-[4px] hover:shadow-[0_4px_8px_rgba(244,63,94,0.06)] transition-all duration-150 cursor-pointer"
                 >
                   <LogOut size={16} />
                   تسجيل الخروج
-                </button>
+                </motion.button>
               </div>
             </div>
           </div>
@@ -5440,31 +9356,24 @@ function AppContent() {
                 </div>
               <div className="flex items-center gap-2">
                 <button 
-                  onClick={() => setIsDarkMode(!isDarkMode)}
-                  className="p-2.5 bg-gray-50 dark:bg-slate-800 text-gray-500 dark:text-slate-400 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-700 transition-all"
-                  title={isDarkMode ? 'تفعيل الوضع الفاتح' : 'تفعيل الوضع الليلي'}
-                >
-                  {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
-                </button>
-                <button 
                   onClick={() => setIsSidebarOpen(false)}
-                  className="p-2.5 bg-gray-50 dark:bg-slate-800 text-gray-500 dark:text-slate-400 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 transition-all"
+                  className="p-2.5 bg-gray-50 dark:bg-slate-800 text-gray-500 dark:text-slate-400 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
                 >
                   <X size={20} />
                 </button>
               </div>
               </div>
               
-              <nav className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
+              <nav className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
                 {NAV_ITEMS.map((item) => {
-                  const isAlertTab = item.id === 'property-alerts';
+                  const isAlertTab = item.id === 'tenants';
                   const alertCount = isAlertTab ? getExpiringContracts(30).length : 0;
 
                   return (
                     <motion.button
                       key={item.id}
-                      whileHover={{ x: -5 }}
-                      whileTap={{ scale: 0.98 }}
+                      whileHover={{ x: -4, y: -1, scale: 1.01 }}
+                      whileTap={{ y: 2, scale: 0.98 }}
                       onClick={() => {
                         if (item.id === 'settings') {
                           setIsBrandingModalOpen(true);
@@ -5474,20 +9383,22 @@ function AppContent() {
                         setIsSidebarOpen(false);
                       }}
                       className={cn(
-                        "w-full flex items-center justify-between px-4 py-3.5 rounded-2xl font-bold text-sm transition-all duration-200",
+                        "w-full flex items-center justify-between px-4 py-3.5 rounded-[1.25rem] font-bold text-sm transition-all duration-150 cursor-pointer relative",
                         activeTab === item.id
-                          ? "bg-primary text-white shadow-lg shadow-primary/20 dark:shadow-none"
-                          : "text-gray-500 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-slate-800 hover:text-primary dark:hover:text-primary"
+                          ? "bg-gradient-to-b from-primary to-primary-dark text-white border-t border-t-white/30 border-x border-x-white/10 border-b-[5px] border-b-primary-dark shadow-[0_6px_12px_rgba(0,0,0,0.15)]"
+                          : "bg-white dark:bg-slate-900/60 text-slate-600 dark:text-slate-400 border border-slate-200/80 dark:border-slate-800/80 border-b-[3.5px] border-b-slate-300 dark:border-b-slate-950 shadow-[0_3px_5px_-2px_rgba(0,0,0,0.03)] hover:bg-slate-50/80 dark:hover:bg-slate-850/60 hover:text-primary dark:hover:text-primary hover:border-b-[4.5px]"
                       )}
                     >
                       <div className="flex items-center gap-3">
-                        <item.icon size={20} />
+                        <item.icon size={20} className={cn(activeTab === item.id ? "text-white" : "text-slate-400 dark:text-slate-500")} />
                         <span>{item.label}</span>
                       </div>
                       {alertCount > 0 && (
                         <span className={cn(
-                          "w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black",
-                          activeTab === item.id ? "bg-white text-primary" : "bg-rose-500 text-white"
+                          "w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black border-b-[2px]",
+                          activeTab === item.id 
+                            ? "bg-white text-primary border-b-slate-200" 
+                            : "bg-rose-500 text-white border-b-rose-700"
                         )}>
                           {alertCount}
                         </span>
@@ -5498,38 +9409,27 @@ function AppContent() {
               </nav>
               
               <div className="p-4 border-t dark:border-slate-800 space-y-3">
-                <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-slate-800 rounded-2xl border dark:border-slate-700">
-                  <div className="theme-switch-wrapper">
-                    <label className="theme-switch" htmlFor="mobile-checkbox">
-                      <input 
-                        type="checkbox" 
-                        id="mobile-checkbox" 
-                        checked={isDarkMode}
-                        onChange={() => setIsDarkMode(!isDarkMode)}
-                      />
-                      <div className="slider round"></div>
-                    </label>
-                    <em className="text-xs font-black text-gray-900 dark:text-white not-italic">الوضع الداكن</em>
-                  </div>
-                </div>
 
-                <div className="bg-gray-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-gray-100 dark:border-slate-800">
+
+                <div className="bg-slate-100/60 dark:bg-slate-950/40 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800/85 border-b-[4px] border-b-slate-300 dark:border-b-slate-950/90 shadow-sm">
                   <div className="flex items-center gap-3 mb-3">
-                    <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white font-black text-sm shadow-inner">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-b from-primary to-primary-dark flex items-center justify-center text-white font-black text-sm border-t border-t-white/20 border-b-[3px] border-b-primary-dark shadow-md">
                       {user.displayName?.[0] || 'U'}
                     </div>
                     <div className="text-right">
                       <p className="text-xs font-black text-gray-900 dark:text-white leading-none">{user.displayName}</p>
-                      <p className="text-[10px] font-bold text-gray-500 dark:text-slate-400 mt-1">{isAdmin ? 'مسؤول النظام' : 'مستخدم'}</p>
+                      <p className="text-[10px] font-bold text-gray-400 dark:text-slate-500 mt-1">{isAdmin ? 'مسؤول النظام' : 'مستخدم'}</p>
                     </div>
                   </div>
-                  <button 
+                  <motion.button 
+                    whileHover={{ scale: 1.02, y: -0.5 }}
+                    whileTap={{ scale: 0.98, y: 0.5 }}
                     onClick={logout}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-rose-500 font-bold text-xs hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-all"
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 border border-rose-100/60 dark:border-rose-900/35 border-b-[3px] border-b-rose-200 dark:border-b-rose-950/70 hover:bg-rose-100/40 dark:hover:bg-rose-900/30 font-bold text-xs hover:border-b-[4px] hover:shadow-[0_4px_8px_rgba(244,63,94,0.06)] transition-all duration-150 cursor-pointer"
                   >
                     <LogOut size={16} />
                     تسجيل الخروج
-                  </button>
+                  </motion.button>
                 </div>
               </div>
             </motion.aside>
@@ -5540,7 +9440,7 @@ function AppContent() {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top Navigation Bar */}
         <header className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b dark:border-slate-800 sticky top-0 z-50 transition-colors duration-300">
-          <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="w-full max-w-none px-4 sm:px-6 lg:px-12">
             <div className="flex items-center justify-between h-20">
               <div className="flex items-center gap-4 shrink-0">
                 <div className="relative group">
@@ -5580,64 +9480,76 @@ function AppContent() {
               {/* Menu Toggle */}
               {activeTab !== 'staff' && (
                 <motion.button
-                  whileTap={{ scale: 0.9 }}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
                   onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                  className="p-2.5 bg-slate-100 dark:bg-slate-800 text-gray-600 dark:text-slate-400 rounded-xl"
+                  className="p-2.5 bg-gray-50 hover:bg-gray-100 dark:bg-slate-800 dark:hover:bg-slate-750 text-gray-600 dark:text-slate-300 rounded-xl transition-colors border border-gray-100 dark:border-slate-700/50"
                 >
-                  <Menu size={22} />
+                  <Menu size={20} />
                 </motion.button>
               )}
 
-              <div className="hidden sm:flex items-center gap-3 bg-slate-100/50 dark:bg-slate-800/50 px-4 py-2 rounded-2xl border border-gray-200/50 dark:border-slate-700/50">
-                <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white font-black text-xs shadow-inner">
+              {/* Profile Card (Hidden as requested) */}
+              {/*
+              <div className="hidden sm:flex items-center gap-3 bg-gray-50 dark:bg-slate-800/40 px-4 py-2 rounded-2xl border border-gray-150/60 dark:border-slate-700/50 hover:bg-gray-100/50 dark:hover:bg-slate-800/60 transition-all duration-300 shadow-xs">
+                <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white font-black text-xs shadow-inner shrink-0">
                   {user.displayName?.[0] || 'U'}
                 </div>
                 <div className="text-right hidden xl:block">
                   <p className="text-xs font-black text-gray-900 dark:text-white leading-none">{user.displayName}</p>
-                  <p className="text-[10px] font-bold text-gray-500 dark:text-slate-400 mt-1">{isAdmin ? 'مسؤول النظام' : 'مستخدم'}</p>
+                  <p className="text-[10px] font-bold text-gray-400 dark:text-slate-500 mt-1">{isAdmin ? 'مسؤول النظام' : 'مستخدم'}</p>
                 </div>
               </div>
+              */}
 
-              <div className="flex items-center gap-3 bg-slate-100 dark:bg-slate-800 px-4 py-2 rounded-2xl border dark:border-slate-700">
-                <div className="theme-switch-wrapper">
-                  <label className="theme-switch" htmlFor="header-checkbox">
-                    <input 
-                      type="checkbox" 
-                      id="header-checkbox" 
-                      checked={isDarkMode}
-                      onChange={() => setIsDarkMode(!isDarkMode)}
-                    />
-                    <div className="slider round"></div>
-                  </label>
-                  <em className="text-xs font-black text-gray-600 dark:text-slate-400 not-italic">الوضع الداكن</em>
+              {/* Modern Theme Switch Toggle (Hidden as requested) */}
+              {/*
+              <div 
+                onClick={() => setIsDarkMode(!isDarkMode)}
+                className="flex items-center gap-2.5 bg-gray-50 hover:bg-gray-100 dark:bg-slate-800/40 dark:hover:bg-slate-800/80 px-4 py-2 rounded-2xl border border-gray-150/60 dark:border-slate-700/50 transition-all duration-300 shadow-xs cursor-pointer select-none group"
+                title={isDarkMode ? 'التبديل للوضع الفاتح' : 'التبديل للوضع الداكن'}
+              >
+                <div className="relative w-9 h-5 bg-gray-200 dark:bg-primary rounded-full transition-colors duration-250 shrink-0">
+                  <div className={cn(
+                    "absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-xs transition-transform duration-250",
+                    isDarkMode ? "translate-x-4" : "translate-x-0"
+                  )} />
                 </div>
+                <em className="text-xs font-black text-gray-600 dark:text-slate-300 not-italic group-hover:text-primary dark:group-hover:text-white transition-colors">
+                  الوضع الداكن
+                </em>
               </div>
+              */}
 
-                <motion.button 
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
-                  onClick={shareSite}
-                  className="p-2.5 bg-primary/5 dark:bg-primary/20 text-primary rounded-xl hover:bg-primary/10 dark:hover:bg-primary/30 transition-all"
-                >
-                  <Share2 size={20} />
-                </motion.button>
+              {/* Share Button (Modern glass styling) */}
+              <motion.button 
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={shareSite}
+                className="p-2.5 bg-primary/5 hover:bg-primary/10 dark:bg-primary/10 dark:hover:bg-primary/20 text-primary dark:text-primary-light rounded-xl transition-all border border-primary/10"
+                title="مشاركة الموقع"
+              >
+                <Share2 size={18} />
+              </motion.button>
 
-                <motion.button 
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
-                  onClick={logout}
-                  className="p-2.5 bg-rose-50 dark:bg-rose-900/20 text-rose-500 rounded-xl hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-all"
-                >
-                  <LogOut size={20} />
-                </motion.button>
-              </div>
+              {/* Logout Button (High contrast soft-red styling) */}
+              <motion.button 
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={logout}
+                className="p-2.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-900/30 text-rose-500 rounded-xl transition-all border border-rose-100/30 dark:border-rose-900/20"
+                title="تسجيل الخروج"
+              >
+                <LogOut size={18} />
+              </motion.button>
+            </div>
             </div>
           </div>
         </header>
 
       {/* Main Content Area */}
       <main className="flex-1 overflow-y-auto custom-scrollbar">
-        <div className="max-w-[1600px] mx-auto p-4 sm:p-6 lg:p-8">
+        <div className="w-full max-w-none p-4 sm:p-6 lg:p-12">
           {/* Active Tab Header (Optional, since it's in top bar now, but good for context) */}
           {activeTab !== 'staff' && (
             <div className="mb-8 flex items-center justify-between">
@@ -5653,31 +9565,141 @@ function AppContent() {
           )}
           {activeTab === 'dashboard' && (
             <div className="mb-10">
-              {getExpiringContracts(30).length > 0 && (
-                <motion.div 
-                  initial={{ opacity: 0, y: -20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="mb-8 p-6 bg-rose-50 dark:bg-rose-900/10 border-2 border-rose-100 dark:border-rose-900/20 rounded-[2.5rem] flex flex-col md:flex-row items-center justify-between gap-6"
-                >
-                  <div className="flex items-center gap-5">
-                    <div className="w-14 h-14 bg-rose-500 rounded-2xl flex items-center justify-center shadow-lg shadow-rose-200 dark:shadow-none shrink-0">
-                      <Bell className="text-white" size={28} />
+
+              {/* Overdue Unpaid Requests Alert Banner for Admin */}
+              {isAdmin && (() => {
+                const overdueUnpaid = requests.filter(req => {
+                  return req.paymentStatus === 'unpaid' && isBefore(safeToDate(req.date), startOfDay(new Date()));
+                });
+                if (overdueUnpaid.length === 0) return null;
+
+                return (
+                  <div className="mb-8 p-6 bg-red-50/80 dark:bg-red-950/20 border border-red-100 dark:border-red-900/30 rounded-[2rem] shadow-sm">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className="p-3 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-2xl">
+                          <BellRing size={24} className="animate-bounce" />
+                        </div>
+                        <div>
+                          <h3 className="font-cairo text-lg font-black text-red-800 dark:text-red-300">
+                            تنبيه: طلبات متأخرة لم يتم تحصيل قيمتها!
+                          </h3>
+                          <p className="font-cairo text-sm font-bold text-red-700/80 dark:text-red-400/80 mt-0.5">
+                            يوجد {overdueUnpaid.length} طلب تجاوزت تاريخ الاستحقاق المطلوب وهي لا تزال غير مدفوعة.
+                          </p>
+                        </div>
+                      </div>
+                      
+                      <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => setIsOverduePanelExpanded(!isOverduePanelExpanded)}
+                        className="px-6 py-2.5 bg-red-600 hover:bg-red-700 dark:bg-red-800 dark:hover:bg-red-700 text-white font-black text-sm rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                      >
+                        {isOverduePanelExpanded ? 'إخفاء الطلبات المتأخرة' : 'عرض وتذكير العملاء بالواتس'}
+                        <ChevronDown size={16} className={`transition-transform duration-200 ${isOverduePanelExpanded ? 'rotate-180' : ''}`} />
+                      </motion.button>
                     </div>
-                    <div>
-                      <h3 className="text-xl font-black text-gray-900 dark:text-white">تنبيه: عقود قاربت على الانتهاء</h3>
-                      <p className="text-sm font-bold text-gray-500 dark:text-slate-400 mt-1">يوجد {getExpiringContracts(30).length} عقد سينتهي خلال الـ 30 يوماً القادمة.</p>
-                    </div>
+
+                    <AnimatePresence>
+                      {isOverduePanelExpanded && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          className="overflow-hidden mt-6 pt-6 border-t border-red-200/40 dark:border-red-900/40"
+                        >
+                          <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                            {overdueUnpaid.map((req) => {
+                              const apt = apartments.find(a => a.buildingName === req.buildingName && a.number === req.apartmentNumber);
+                              const tenant = apt ? tenants.find(t => t.id === apt.tenantId) : null;
+                              const delayDays = differenceInDays(new Date(), safeToDate(req.date));
+                              
+                              return (
+                                <div key={req.id} className="p-4 bg-white dark:bg-slate-800/80 border border-gray-100 dark:border-slate-700/60 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm hover:shadow-md transition-all">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 rounded-xl flex items-center justify-center font-bold">
+                                      {req.serviceType === 'تنظيف سيارات' ? <Car size={18} /> : <HomeIcon size={18} />}
+                                    </div>
+                                    <div>
+                                      <p className="font-cairo text-sm font-black text-gray-900 dark:text-white">
+                                        شقة {req.apartmentNumber} {req.buildingName ? `(${req.buildingName})` : ''} - <span className="text-primary">{req.serviceType}</span>
+                                      </p>
+                                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs">
+                                        {tenant && (
+                                          <span className="font-bold text-gray-500 dark:text-slate-400">
+                                            المستأجر: {tenant.name}
+                                          </span>
+                                        )}
+                                        <span className="font-black text-rose-600 dark:text-rose-400">
+                                          المبلغ: {req.price} ريال
+                                        </span>
+                                        <span className="font-black text-amber-600 dark:text-amber-400">
+                                          تاريخ الاستحقاق: {format(safeToDate(req.date), 'yyyy/MM/dd')}
+                                        </span>
+                                        <span className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 px-2 py-0.5 rounded-lg font-black shrink-0">
+                                          متأخر {delayDays} يوم
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-2 self-end sm:self-center">
+                                    <motion.button
+                                      whileHover={{ scale: 1.02 }}
+                                      whileTap={{ scale: 0.98 }}
+                                      onClick={() => updateStatus(req.id, 'paymentStatus', 'paid')}
+                                      className="px-4 py-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/20 dark:hover:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/20 rounded-xl font-black text-xs transition-colors cursor-pointer"
+                                    >
+                                      تأكيد كمدفوع
+                                    </motion.button>
+
+                                    <motion.button
+                                      whileHover={{ scale: 1.02 }}
+                                      whileTap={{ scale: 0.98 }}
+                                      onClick={() => {
+                                        const dueDateStr = format(safeToDate(req.date), 'yyyy/MM/dd');
+                                        const msg = `تذكير بسداد مستحقات متأخرة 🔔💸\n\n` +
+                                          `السلام عليكم ورحمة الله وبركاته،\n` +
+                                          `نفيدكم بوجود مستحقات لم يتم سدادها في النظام لـ:\n` +
+                                          `• رقم الشقة: شقة ${req.apartmentNumber} ${req.buildingName ? `(${req.buildingName})` : ''}\n` +
+                                          (tenant ? `• المستأجر: ${tenant.name}\n` : '') +
+                                          `• الخدمة: ${req.serviceType || 'خدمة النظافة'}\n` +
+                                          `• المبلغ المستحق: ${req.price} ريال\n` +
+                                          `• تاريخ الاستحقاق: ${dueDateStr}\n` +
+                                          `• الحالة: ⏳ غير مدفوع\n\n` +
+                                          `نرجو التكرم بالسداد في أقرب وقت ومشاركتنا إيصال التحويل عبر مجموعة تتبع الدفع والدعم 👇:\n` +
+                                          `🔗 ${whatsappGroupLink || 'https://chat.whatsapp.com/GiYTHd978eMJ3o2oEDb2JC?mode=gi_t'}`;
+                                          
+                                        if (tenant && tenant.phone) {
+                                          let cleanPhone = tenant.phone.trim();
+                                          if (cleanPhone.startsWith('0')) {
+                                            cleanPhone = '966' + cleanPhone.substring(1);
+                                          } else if (!cleanPhone.startsWith('+') && !cleanPhone.startsWith('966')) {
+                                            cleanPhone = '966' + cleanPhone;
+                                          }
+                                          window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(msg)}`, '_blank');
+                                        } else {
+                                          window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
+                                        }
+                                      }}
+                                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                                      title="تذكير المستأجر بالواتس"
+                                    >
+                                      <MessageCircle size={14} />
+                                      <span>تذكير بالواتس</span>
+                                    </motion.button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => setActiveTab('property-alerts')}
-                    className="px-8 py-3 bg-rose-500 text-white rounded-2xl font-black text-sm shadow-lg shadow-rose-200 hover:bg-rose-600 transition-all whitespace-nowrap"
-                  >
-                    عرض التفاصيل
-                  </motion.button>
-                </motion.div>
-              )}
+                );
+              })()}
 
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
                 <div className="flex items-center gap-4">
@@ -5694,39 +9716,64 @@ function AppContent() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => {
-                      setBulkPrintRequests(filteredRequests);
-                      setIsPrintingBulk(true);
-                    }}
-                    className="flex items-center gap-2 px-6 py-3 bg-primary/10 text-primary border border-primary/20 rounded-2xl font-black text-sm shadow-sm transition-all"
-                  >
-                    <FileText size={18} />
-                    طباعة فواتير
-                  </motion.button>
+                <div className="flex items-center gap-3 relative">
+                  <div className="relative">
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => setIsActionsDropdownOpen(!isActionsDropdownOpen)}
+                      className="flex items-center gap-2 px-6 py-3 bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-gray-200 dark:border-slate-700 rounded-2xl font-black text-sm shadow-sm transition-all focus:outline-none cursor-pointer"
+                    >
+                      <ChevronDown size={18} className={`transition-transform duration-200 ${isActionsDropdownOpen ? 'rotate-180' : ''}`} />
+                      <span>خيارات إضافية</span>
+                    </motion.button>
 
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => setIsPrintingReport(true)}
-                    className="flex items-center gap-2 px-6 py-3 bg-slate-100 dark:bg-slate-800 text-gray-600 dark:text-slate-300 border dark:border-slate-700 rounded-2xl font-black text-sm shadow-sm transition-all"
-                  >
-                    <Printer size={18} />
-                    طباعة تقرير
-                  </motion.button>
+                    {isActionsDropdownOpen && (
+                      <>
+                        <div 
+                          className="fixed inset-0 z-30" 
+                          onClick={() => setIsActionsDropdownOpen(false)}
+                        />
+                        <div className="absolute left-0 mt-2 w-56 bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl shadow-xl py-2 z-40 animate-in fade-in slide-in-from-top-2 duration-150">
+                          <button
+                            onClick={() => {
+                              setBulkPrintRequests(filteredRequests);
+                              setIsPrintingBulk(true);
+                              setIsActionsDropdownOpen(false);
+                            }}
+                            className="w-full flex items-center justify-start gap-3 px-4 py-3 text-right text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-700/50 font-black text-sm transition-colors cursor-pointer"
+                          >
+                            <FileText size={18} className="text-primary" />
+                            <span>طباعة فواتير</span>
+                          </button>
 
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => setIsExportModalOpen(true)}
-                    className="flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-2xl font-black text-sm shadow-lg shadow-emerald-200 dark:shadow-none transition-all"
-                  >
-                    <Download size={18} />
-                    تصدير البيانات
-                  </motion.button>
+                          <button
+                            onClick={() => {
+                              setIsPrintingReport(true);
+                              setIsActionsDropdownOpen(false);
+                            }}
+                            className="w-full flex items-center justify-start gap-3 px-4 py-3 text-right text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-700/50 font-black text-sm transition-colors cursor-pointer"
+                          >
+                            <Printer size={18} className="text-gray-500" />
+                            <span>طباعة تقرير</span>
+                          </button>
+
+                          <div className="border-t border-gray-100 dark:border-slate-700 my-1" />
+
+                          <button
+                            onClick={() => {
+                              setIsExportModalOpen(true);
+                              setIsActionsDropdownOpen(false);
+                            }}
+                            className="w-full flex items-center justify-start gap-3 px-4 py-3 text-right text-emerald-600 dark:text-emerald-400 hover:bg-gray-50 dark:hover:bg-slate-700/50 font-black text-sm transition-colors cursor-pointer"
+                          >
+                            <Download size={18} />
+                            <span>تصدير البيانات</span>
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
                   
                   <motion.button
                     whileHover={{ scale: 1.05 }}
@@ -5918,6 +9965,8 @@ function AppContent() {
                 </div>
               </motion.div>
             </div>
+
+
           </div>
         )}
 
@@ -6048,179 +10097,254 @@ function AppContent() {
           })()}
 
           {/* Top Bar: Month & Search */}
-          {activeTab !== 'staff' && (
-            <div className="flex flex-col lg:flex-row gap-6 mb-10">
-            <div className="flex items-center gap-3 bg-box dark:bg-slate-900 p-2 rounded-3xl shadow-sm border border-gray-100 dark:border-slate-800">
-              <motion.button 
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.9 }}
-                onClick={() => setSelectedMonth(subMonths(selectedMonth, 1))}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-2xl transition-colors dark:text-gray-400"
-              >
-                <ChevronRight size={24} />
-              </motion.button>
-              <div className="flex items-center gap-3 px-4 min-w-[180px] justify-center">
-                <Calendar className="text-primary" size={22} />
-                <span className="font-black text-lg dark:text-white">{format(selectedMonth, 'MMMM yyyy', { locale: ar })}</span>
-              </div>
-              <motion.button 
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.9 }}
-                onClick={() => setSelectedMonth(addMonths(selectedMonth, 1))}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-2xl transition-colors dark:text-gray-400"
-              >
-                <ChevronLeft size={24} />
-              </motion.button>
-            </div>
+          {activeTab !== 'staff' && activeTab !== 'car-subscriptions' && (
+            <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-[2.5rem] p-6 sm:p-8 shadow-sm mb-10 space-y-6">
+              {/* Row 1: Month navigation and Search */}
+              <div className="flex flex-col xl:flex-row gap-4 items-stretch xl:items-center justify-between">
+                {/* Month Navigator */}
+                <div className="flex flex-wrap items-center gap-3 bg-gray-50 dark:bg-slate-800/30 p-2 rounded-3xl border border-gray-100/10 dark:border-slate-800/50 w-full xl:w-auto">
+                  <motion.button 
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setSelectedMonth(subMonths(selectedMonth, 1))}
+                    className="p-2 sm:p-2.5 bg-white dark:bg-slate-800 hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-600 dark:text-gray-400 rounded-2xl transition-all shadow-sm border border-gray-100 dark:border-slate-800"
+                  >
+                    <ChevronRight size={20} />
+                  </motion.button>
+                  <div className="relative flex items-center gap-3 px-4 min-w-[160px] justify-center flex-1 sm:flex-initial cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800/50 rounded-2xl py-1 transition-all">
+                    <Calendar className="text-primary" size={20} />
+                    <span className="font-black text-base sm:text-lg text-gray-900 dark:text-white underline decoration-dotted decoration-primary/50 underline-offset-4">
+                      {format(selectedMonth, 'MMMM yyyy', { locale: ar })}
+                    </span>
+                    <input 
+                      type="month" 
+                      value={format(selectedMonth, 'yyyy-MM')} 
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          const [year, month] = e.target.value.split('-').map(Number);
+                          setSelectedMonth(new Date(year, month - 1, 1));
+                        }
+                      }}
+                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                    />
+                  </div>
+                  <motion.button 
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setSelectedMonth(addMonths(selectedMonth, 1))}
+                    className="p-2 sm:p-2.5 bg-white dark:bg-slate-800 hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-600 dark:text-gray-400 rounded-2xl transition-all shadow-sm border border-gray-100 dark:border-slate-800"
+                  >
+                    <ChevronLeft size={20} />
+                  </motion.button>
+                  
+                  <div className="hidden sm:block w-px h-8 bg-gray-200 dark:bg-slate-800 mx-1" />
+                  
+                  <motion.button 
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={duplicatePreviousMonthSchedule}
+                    className="flex items-center gap-2 px-4 py-2 hover:bg-primary/10 text-primary rounded-2xl transition-all font-black text-xs"
+                    title="نسخ جدول الشهر السابق"
+                  >
+                    <Repeat size={16} />
+                    <span>نسخ جدول الشهر السابق</span>
+                  </motion.button>
 
-            <div className="flex-1 flex flex-col xl:flex-row gap-4">
-              {/* Service Filter */}
-              {(activeTab === 'dashboard' || activeTab === 'daily-tasks' || activeTab === 'تكرار الطلبات') && (
-                <div className="flex bg-box dark:bg-slate-900 p-1.5 rounded-3xl shadow-sm border border-gray-100 dark:border-slate-800 h-fit">
+                  <div className="hidden sm:block w-px h-8 bg-gray-200 dark:bg-slate-800 mx-1" />
+
                   <motion.button 
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
-                    onClick={() => setServiceFilter('all')}
-                    className={cn(
-                      "px-4 py-2.5 rounded-2xl font-bold transition-all text-xs",
-                      serviceFilter === 'all' 
-                        ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-lg" 
-                        : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-800"
-                    )}
+                    onClick={() => setIsMonthlyListModalOpen(true)}
+                    className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-2xl transition-all font-black text-xs shadow-md shadow-primary/10 hover:bg-primary/95"
+                    title="إضافة قائمة شهر جديد"
                   >
-                    الكل
-                  </motion.button>
-                  <motion.button 
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => setServiceFilter('apartments')}
-                    className={cn(
-                      "px-4 py-2.5 rounded-2xl font-bold transition-all text-xs flex items-center gap-2",
-                      serviceFilter === 'apartments' 
-                        ? "bg-primary text-white shadow-lg shadow-primary/20 dark:shadow-none" 
-                        : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-800"
-                    )}
-                  >
-                    <Home size={14} />
-                    نظافة الشقق
-                  </motion.button>
-                  <motion.button 
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => setServiceFilter('cars')}
-                    className={cn(
-                      "px-4 py-2.5 rounded-2xl font-bold transition-all text-xs flex items-center gap-2",
-                      serviceFilter === 'cars' 
-                        ? "bg-primary text-white shadow-lg shadow-primary/20 dark:shadow-none" 
-                        : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-800"
-                    )}
-                  >
-                    <Car size={14} />
-                    تنظيف السيارات
+                    <Plus size={16} />
+                    <span>إضافة قائمة شهر جديد</span>
                   </motion.button>
                 </div>
-              )}
 
-              <div className="flex-1 relative">
-                <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500" size={22} />
-                <input 
-                  type="text"
-                  placeholder={
-                    activeTab === 'تنظيف سيارات' || serviceFilter === 'cars' 
-                      ? "البحث برقم اللوحة..." 
-                      : "البحث برقم الشقة أو المبنى..."
-                  }
-                  className="w-full pr-12 pl-6 py-4 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl shadow-sm focus:ring-4 focus:ring-primary/10 outline-none transition-all font-medium dark:text-white dark:placeholder-gray-600"
-                  value={searchTerm}
-                  onChange={e => setSearchTerm(e.target.value)}
-                />
-              </div>
-              
-              <div className="flex bg-white dark:bg-slate-900 p-1.5 rounded-3xl shadow-sm border border-gray-100 dark:border-slate-800 h-fit">
-                <motion.button 
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => setPaymentFilter('all')}
-                  className={cn(
-                    "px-6 py-2.5 rounded-2xl font-bold transition-all text-sm",
-                    paymentFilter === 'all' 
-                      ? "bg-primary text-white shadow-lg shadow-primary/20 dark:shadow-none" 
-                      : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-800"
-                  )}
-                >
-                  الكل
-                </motion.button>
-                <motion.button 
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => setPaymentFilter('paid')}
-                  className={cn(
-                    "px-6 py-2.5 rounded-2xl font-bold transition-all text-sm",
-                    paymentFilter === 'paid' 
-                      ? "bg-emerald-600 text-white shadow-lg shadow-emerald-200 dark:shadow-none" 
-                      : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-800"
-                  )}
-                >
-                  المدفوعات
-                </motion.button>
-                <motion.button 
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => setPaymentFilter('unpaid')}
-                  className={cn(
-                    "px-6 py-2.5 rounded-2xl font-bold transition-all text-sm",
-                    paymentFilter === 'unpaid' 
-                      ? "bg-rose-600 text-white shadow-lg shadow-rose-200 dark:shadow-none" 
-                      : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-800"
-                  )}
-                >
-                  غير المدفوع
-                </motion.button>
+                {/* Search Input Bar */}
+                <div className="flex-1 relative w-full xl:max-w-md">
+                  <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 font-bold" size={20} />
+                  <input 
+                    type="text"
+                    placeholder={
+                      activeTab === 'تنظيف سيارات' || serviceFilter === 'cars' 
+                        ? "البحث برقم اللوحة..." 
+                        : "البحث برقم الشقة أو المبنى..."
+                    }
+                    className="w-full pr-12 pl-12 py-3.5 bg-gray-50 dark:bg-slate-800/30 border border-gray-200 dark:border-slate-800 rounded-2xl focus:ring-4 focus:ring-primary/10 hover:border-gray-300 dark:hover:border-slate-700 outline-none transition-all font-black text-sm dark:text-white dark:placeholder-gray-600"
+                    value={searchTerm}
+                    onChange={e => setSearchTerm(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={startVoiceSearch}
+                    className={cn(
+                      "absolute left-4 top-1/2 -translate-y-1/2 p-1.5 rounded-full transition-all flex items-center justify-center",
+                      isListening 
+                        ? "bg-rose-500 text-white animate-pulse" 
+                        : "text-gray-400 hover:text-primary hover:bg-gray-100 dark:hover:bg-slate-700/50"
+                    )}
+                    title="البحث الصوتي"
+                  >
+                    {isListening ? <Mic size={18} /> : <MicOff size={18} />}
+                  </button>
+                </div>
               </div>
 
-              <div className="flex items-center gap-2 bg-box dark:bg-slate-900 p-1.5 rounded-2xl border border-gray-100 dark:border-slate-800 shadow-sm overflow-x-auto no-scrollbar">
-                <motion.button 
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => setStatusFilter('all')}
-                  className={cn(
-                    "px-6 py-2.5 rounded-2xl font-bold transition-all text-sm whitespace-nowrap",
-                    statusFilter === 'all' 
-                      ? "bg-primary text-white shadow-lg shadow-primary/20 dark:shadow-none" 
-                      : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-800"
-                  )}
-                >
-                  كل الحالات
-                </motion.button>
-                <motion.button 
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => setStatusFilter('completed')}
-                  className={cn(
-                    "px-6 py-2.5 rounded-2xl font-bold transition-all text-sm whitespace-nowrap",
-                    statusFilter === 'completed' 
-                      ? "bg-primary text-white shadow-lg shadow-primary/20 dark:shadow-none" 
-                      : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-800"
-                  )}
-                >
-                  منفذة
-                </motion.button>
-                <motion.button 
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => setStatusFilter('pending')}
-                  className={cn(
-                    "px-6 py-2.5 rounded-2xl font-bold transition-all text-sm whitespace-nowrap",
-                    statusFilter === 'pending' 
-                      ? "bg-amber-600 text-white shadow-lg shadow-amber-200 dark:shadow-none" 
-                      : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-800"
-                  )}
-                >
-                  قيد التنفيذ
-                </motion.button>
+              {/* Row 2: Categorized Micro-filters */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-6 border-t border-gray-100 dark:border-slate-800">
+                {/* Service Filter */}
+                {(activeTab === 'dashboard' || activeTab === 'daily-tasks' || activeTab === 'تكرار الطلبات') ? (
+                  <div className="flex flex-col gap-2">
+                    <span className="text-xs font-black text-gray-400 dark:text-slate-500 uppercase tracking-wider mr-2">فلتر الخدمات</span>
+                    <div className="flex bg-gray-50 dark:bg-slate-800/30 p-1.5 rounded-2xl border border-gray-200/50 dark:border-slate-800/50 h-fit">
+                      <motion.button 
+                        whileHover={{ scale: 1.01 }}
+                        whileTap={{ scale: 0.99 }}
+                        onClick={() => setServiceFilter('all')}
+                        className={cn(
+                          "flex-1 py-2 rounded-xl font-black transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5",
+                          serviceFilter === 'all' 
+                            ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm" 
+                            : "text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-slate-800/50"
+                        )}
+                      >
+                        الكل
+                      </motion.button>
+                      <motion.button 
+                        whileHover={{ scale: 1.01 }}
+                        whileTap={{ scale: 0.99 }}
+                        onClick={() => setServiceFilter('apartments')}
+                        className={cn(
+                          "flex-1 py-2 rounded-xl font-black transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5",
+                          serviceFilter === 'apartments' 
+                            ? "bg-primary text-white shadow-md shadow-primary/10 dark:shadow-none" 
+                            : "text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-slate-800/50"
+                        )}
+                      >
+                        <Home size={14} />
+                        الشقق
+                      </motion.button>
+                      <motion.button 
+                        whileHover={{ scale: 1.01 }}
+                        whileTap={{ scale: 0.99 }}
+                        onClick={() => setServiceFilter('cars')}
+                        className={cn(
+                          "flex-1 py-2 rounded-xl font-black transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5",
+                          serviceFilter === 'cars' 
+                            ? "bg-primary text-white shadow-md shadow-primary/10 dark:shadow-none" 
+                            : "text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-slate-800/50"
+                        )}
+                      >
+                        <Car size={14} />
+                        السيارات
+                      </motion.button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="hidden lg:block" />
+                )}
+
+                {/* Payment Filter */}
+                <div className="flex flex-col gap-2">
+                  <span className="text-xs font-black text-gray-400 dark:text-slate-500 uppercase tracking-wider mr-2">حالة الدفع</span>
+                  <div className="flex bg-gray-50 dark:bg-slate-800/30 p-1.5 rounded-2xl border border-gray-200/50 dark:border-slate-800/50 h-fit">
+                    <motion.button 
+                      whileHover={{ scale: 1.01 }}
+                      whileTap={{ scale: 0.99 }}
+                      onClick={() => setPaymentFilter('all')}
+                      className={cn(
+                        "flex-1 py-2 rounded-xl font-black transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5",
+                        paymentFilter === 'all' 
+                          ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm" 
+                          : "text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-slate-800/50"
+                      )}
+                    >
+                      الكل
+                    </motion.button>
+                    <motion.button 
+                      whileHover={{ scale: 1.01 }}
+                      whileTap={{ scale: 0.99 }}
+                      onClick={() => setPaymentFilter('paid')}
+                      className={cn(
+                        "flex-1 py-2 rounded-xl font-black transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5 text-emerald-600 dark:text-emerald-400",
+                        paymentFilter === 'paid' 
+                          ? "bg-emerald-600 dark:bg-emerald-500 !text-white shadow-md shadow-emerald-500/10 dark:shadow-none" 
+                          : "hover:bg-white dark:hover:bg-slate-800/50"
+                      )}
+                    >
+                      <span className={cn("w-2 h-2 rounded-full block", paymentFilter === 'paid' ? "bg-white" : "bg-emerald-500")} />
+                      المدفوع
+                    </motion.button>
+                    <motion.button 
+                      whileHover={{ scale: 1.01 }}
+                      whileTap={{ scale: 0.99 }}
+                      onClick={() => setPaymentFilter('unpaid')}
+                      className={cn(
+                        "flex-1 py-2 rounded-xl font-black transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5 text-rose-600 dark:text-rose-400",
+                        paymentFilter === 'unpaid' 
+                          ? "bg-rose-600 dark:bg-rose-500 !text-white shadow-md shadow-rose-500/10 dark:shadow-none" 
+                          : "hover:bg-white dark:hover:bg-slate-800/50"
+                      )}
+                    >
+                      <span className={cn("w-2 h-2 rounded-full block", paymentFilter === 'unpaid' ? "bg-white" : "bg-rose-500")} />
+                      غير المدفوع
+                    </motion.button>
+                  </div>
+                </div>
+
+                {/* Status Filter */}
+                <div className="flex flex-col gap-2">
+                  <span className="text-xs font-black text-gray-400 dark:text-slate-500 uppercase tracking-wider mr-2">حالة التنفيذ</span>
+                  <div className="flex bg-gray-50 dark:bg-slate-800/30 p-1.5 rounded-2xl border border-gray-200/50 dark:border-slate-800/50 h-fit overflow-x-auto no-scrollbar">
+                    <motion.button 
+                      whileHover={{ scale: 1.01 }}
+                      whileTap={{ scale: 0.99 }}
+                      onClick={() => setStatusFilter('all')}
+                      className={cn(
+                        "flex-1 py-2 rounded-xl font-black transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5",
+                        statusFilter === 'all' 
+                          ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm" 
+                          : "text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-slate-800/50"
+                      )}
+                    >
+                      الكل
+                    </motion.button>
+                    <motion.button 
+                      whileHover={{ scale: 1.01 }}
+                      whileTap={{ scale: 0.99 }}
+                      onClick={() => setStatusFilter('completed')}
+                      className={cn(
+                        "flex-1 py-2 rounded-xl font-black transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5 text-blue-600 dark:text-blue-400",
+                        statusFilter === 'completed' 
+                          ? "bg-primary !text-white shadow-md shadow-primary/10 dark:shadow-none" 
+                          : "hover:bg-white dark:hover:bg-slate-800/50"
+                      )}
+                    >
+                      <span className={cn("w-2 h-2 rounded-full block", statusFilter === 'completed' ? "bg-white" : "bg-blue-500")} />
+                      منفذة
+                    </motion.button>
+                    <motion.button 
+                      whileHover={{ scale: 1.01 }}
+                      whileTap={{ scale: 0.99 }}
+                      onClick={() => setStatusFilter('pending')}
+                      className={cn(
+                        "flex-1 py-2 rounded-xl font-black transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5 text-amber-600 dark:text-amber-400",
+                        statusFilter === 'pending' 
+                          ? "bg-amber-500 border border-amber-200 !text-white shadow-sm" 
+                          : "hover:bg-white dark:hover:bg-slate-800/50"
+                      )}
+                    >
+                      <span className={cn("w-2 h-2 rounded-full block", statusFilter === 'pending' ? "bg-white animate-pulse" : "bg-amber-500")} />
+                      قيد التنفيذ
+                    </motion.button>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
           )}
 
           {/* Historical Task Alert Box (Car Cleaning) */}
@@ -6597,54 +10721,216 @@ function AppContent() {
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {dayRequests.map(req => (
-                          <motion.div 
-                            key={req.id}
-                            whileHover={{ y: -5 }}
-                            onClick={() => {
-                              setEditingRequest(req);
-                              setIsModalOpen(true);
-                            }}
-                            className="bg-gray-50 dark:bg-slate-800/50 p-6 rounded-[2rem] border border-gray-100 dark:border-slate-700 flex items-center justify-between group cursor-pointer"
-                          >
-                            <div className="flex items-center gap-4">
-                              <div className="bg-white dark:bg-slate-800 p-3 rounded-2xl text-primary shadow-sm group-hover:scale-110 transition-transform">
-                                {req.serviceType === 'تنظيف سيارات' ? <Car size={24} /> : <Home size={24} />}
+                        {dayRequests.map(req => {
+                          const reqDate = safeToDate(req.date);
+                          const isMidnight = format(reqDate, 'HH:mm') === '00:00';
+                          const timeText = isMidnight ? 'طوال اليوم (مرن)' : format(reqDate, 'hh:mm a', { locale: ar });
+
+                          // Find tenant
+                          let requestTenant = tenants.find(t => t.id === apartments.find(a => a.buildingName === req.buildingName && a.number === req.apartmentNumber)?.tenantId);
+                          if (!requestTenant) {
+                            requestTenant = tenants.find(t => {
+                              const apt = apartments.find(a => a.id === t.apartmentId);
+                              return apt && apt.buildingName === req.buildingName && apt.number === req.apartmentNumber;
+                            });
+                          }
+
+                          // Icon chooser
+                          const getServiceIcon = (type: string) => {
+                            const name = type.toLowerCase();
+                            if (name.includes('سيار') || name.includes('car')) {
+                              return <Car size={20} className="text-blue-500 dark:text-blue-400" />;
+                            }
+                            if (name.includes('ماء') || name.includes('water') || name.includes('جالون')) {
+                              return <Droplets size={20} className="text-sky-500 dark:text-sky-400" />;
+                            }
+                            if (name.includes('صيانة') || name.includes('maintenance') || name.includes('تصليح')) {
+                              return <Wrench size={20} className="text-amber-500 dark:text-amber-400" />;
+                            }
+                            if (name.includes('نظاف') || name.includes('clean') || name.includes('كنس')) {
+                              return <Sparkles size={20} className="text-indigo-500 dark:text-indigo-400" />;
+                            }
+                            return <Home size={20} className="text-primary" />;
+                          };
+
+                          return (
+                            <motion.div 
+                              key={req.id}
+                              whileHover={{ y: -6, boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.05), 0 8px 10px -6px rgb(0 0 0 / 0.05)' }}
+                              onClick={() => {
+                                setEditingRequest(req);
+                                setIsModalOpen(true);
+                              }}
+                              className="bg-white dark:bg-slate-800/80 p-6 rounded-[2.5rem] border border-gray-100/80 dark:border-slate-800/60 shadow-xs flex flex-col justify-between group cursor-pointer relative overflow-hidden transition-all duration-350 min-h-[230px]"
+                            >
+                              {/* Background ambient bubble */}
+                              <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full -mr-16 -mt-16 blur-2xl group-hover:bg-primary/10 transition-all duration-500 pointer-events-none" />
+
+                              {/* Card Header: Icon & Status Badges */}
+                              <div className="flex items-center justify-between mb-5 relative z-10">
+                                <div className="flex items-center gap-3">
+                                  <div className="bg-gray-50 dark:bg-slate-700/50 p-3.5 rounded-[1.25rem] text-primary shadow-xs group-hover:scale-105 transition-transform duration-300">
+                                    {getServiceIcon(req.serviceType)}
+                                  </div>
+                                  <div>
+                                    <span className="inline-block text-[10px] font-black tracking-widest text-primary bg-primary/10 dark:bg-primary/20 px-2.5 py-1 rounded-lg">
+                                      {req.serviceType}
+                                    </span>
+                                  </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                                  {/* Payment Button */}
+                                  <motion.button 
+                                    whileHover={{ scale: 1.05 }}
+                                    whileTap={{ scale: 0.95 }}
+                                    onClick={() => {
+                                      updateStatus(req.id, 'paymentStatus', req.paymentStatus === 'paid' ? 'unpaid' : 'paid');
+                                    }}
+                                    className={cn(
+                                      "p-2 rounded-xl transition-all shadow-xs border",
+                                      req.paymentStatus === 'paid' 
+                                        ? "bg-emerald-50 text-emerald-600 border-emerald-100/30 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-900/10" 
+                                        : "bg-rose-50 text-rose-600 border-rose-100/30 dark:bg-rose-950/30 dark:text-rose-450 dark:border-rose-900/10"
+                                    )}
+                                    title={req.paymentStatus === 'paid' ? 'مدفوع' : 'غير مدفوع'}
+                                  >
+                                    <CreditCard size={15} />
+                                  </motion.button>
+                                  
+                                  {/* Status Toggle Badge */}
+                                  <motion.button 
+                                    whileHover={{ scale: 1.05 }}
+                                    whileTap={{ scale: 0.95 }}
+                                    onClick={() => {
+                                      updateStatus(req.id, 'status', req.status === 'pending' ? 'completed' : 'pending');
+                                    }}
+                                    className={cn(
+                                      "px-3 py-1.5 rounded-xl text-[10px] font-black uppercase transition-all shadow-xs border",
+                                      req.status === 'completed' 
+                                        ? "bg-emerald-50 text-emerald-600 border-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-900/20" 
+                                        : "bg-amber-50 text-amber-600 border-amber-100 dark:bg-amber-950/30 dark:text-amber-400 dark:border-amber-900/20"
+                                    )}
+                                  >
+                                    {req.status === 'completed' ? 'تم ✓' : 'معلق ✕'}
+                                  </motion.button>
+                                </div>
                               </div>
-                              <div>
-                                <p className="font-black text-gray-900 dark:text-white">شقة {req.apartmentNumber}</p>
-                                <p className="text-xs font-bold text-gray-500 dark:text-slate-400">{req.serviceType}</p>
+
+                              {/* Card Body */}
+                              <div className="mb-6 space-y-2 relative z-10 text-right">
+                                <h4 className="text-lg font-black text-gray-900 dark:text-white leading-tight flex items-baseline justify-start gap-1.5 direction-rtl">
+                                  <span>شقة {req.apartmentNumber}</span>
+                                  {req.buildingName && (
+                                    <span className="text-xs font-bold text-gray-400 dark:text-slate-500 font-cairo">
+                                      {req.buildingName}
+                                    </span>
+                                  )}
+                                </h4>
+                                
+                                {requestTenant ? (
+                                  <p className="text-xs font-bold text-gray-700 dark:text-slate-350 flex items-center justify-start gap-1.5 direction-rtl">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                    <span className="text-gray-400">المستأجر:</span>
+                                    <span className="font-extrabold text-gray-900 dark:text-white">{requestTenant.name}</span>
+                                  </p>
+                                ) : (
+                                  <p className="text-xs font-bold text-gray-400 dark:text-slate-500 flex items-center justify-start gap-1.5 direction-rtl">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-slate-600" />
+                                    <span>المستأجر: غير مسجل</span>
+                                  </p>
+                                )}
+
+                                {/* Timing Info Box */}
+                                <div className="flex items-center justify-start gap-2 text-xs font-bold text-gray-500 dark:text-slate-450 mt-3 bg-gray-55/60 dark:bg-slate-800/20 px-3 py-1.5 rounded-xl border border-gray-100/50 dark:border-slate-800/10 w-fit direction-rtl ml-auto">
+                                  <Clock size={13} className="text-primary-light" />
+                                  <span>توقيت المهمة:</span>
+                                  <span className="font-extrabold text-gray-800 dark:text-slate-200">{timeText}</span>
+                                </div>
                               </div>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  updateStatus(req.id, 'paymentStatus', req.paymentStatus === 'unpaid' ? 'paid' : 'unpaid');
-                                }}
-                                className={cn(
-                                  "p-2 rounded-xl transition-all",
-                                  req.paymentStatus === 'paid' ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400" : "bg-rose-100 text-rose-700 dark:bg-rose-900/20 dark:text-rose-400"
+
+                              {/* Card Footer: WhatsApp Integration */}
+                              <div className="pt-4 border-t border-gray-100/50 dark:border-slate-800/60 mt-auto flex items-center justify-between gap-3 relative z-10" onClick={(e) => e.stopPropagation()}>
+                                {requestTenant?.phone ? (
+                                  <motion.button
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                    onClick={() => {
+                                      const cleanedPhone = requestTenant.phone.replace(/\s+/g, '');
+                                      const formattedMsg = `السلام عليكم ورحمة الله وبركاته، عزيزي المستأجر ${requestTenant.name} لـ شقة ${req.apartmentNumber} في ${req.buildingName}. نود إفادتكم بوجود مهمة مجدولة لـ (${req.serviceType}) بتاريخ اليوم ${format(reqDate, 'yyyy/MM/dd')}. تفضلوا بقبول وافر الاحترام والتقدير.`;
+                                      window.open(`https://wa.me/${cleanedPhone}?text=${encodeURIComponent(formattedMsg)}`, '_blank');
+                                    }}
+                                    className="w-full py-3 bg-emerald-500 hover:bg-emerald-600 dark:bg-emerald-600/20 dark:hover:bg-emerald-600/30 text-white dark:text-emerald-400 rounded-2xl flex items-center justify-center gap-2 text-xs font-black shadow-lg shadow-emerald-500/10 dark:shadow-none transition-all cursor-pointer border border-emerald-500/20 dark:border-emerald-550/20"
+                                  >
+                                    <MessageCircle size={16} />
+                                    <span>مراسلة المستأجر عبر واتساب</span>
+                                  </motion.button>
+                                ) : activePhoneInputId === req.id ? (
+                                  <div className="w-full flex items-center gap-2 bg-gray-50 dark:bg-slate-850 p-1.5 rounded-2xl border border-gray-200 dark:border-slate-750 animate-fadeIn text-right">
+                                    <input
+                                      type="tel"
+                                      placeholder="أدخل رقم الجوال (مثال: 05xxxxxxxx)"
+                                      value={customPhoneInput[req.id] || ''}
+                                      onChange={(e) => setCustomPhoneInput({ ...customPhoneInput, [req.id]: e.target.value })}
+                                      className="flex-1 bg-transparent border-none text-xs font-bold text-gray-950 dark:text-white px-3 focus:outline-none focus:ring-0 text-right direction-rtl"
+                                      autoFocus
+                                    />
+                                    <motion.button
+                                      whileHover={{ scale: 1.05 }}
+                                      whileTap={{ scale: 0.95 }}
+                                      onClick={async () => {
+                                        const inputNum = customPhoneInput[req.id]?.trim();
+                                        if (!inputNum) {
+                                          toast.error('يرجى إدخال رقم هاتف صحيح');
+                                          return;
+                                        }
+                                        const cleanedPhone = inputNum.replace(/\s+/g, '');
+                                        
+                                        // Save/update phone number in Firestore if a tenant exists!
+                                        if (requestTenant) {
+                                          try {
+                                            await updateDoc(doc(db, 'tenants', requestTenant.id), { phone: cleanedPhone });
+                                            toast.success('تم حفظ وتحديث رقم جوال المستأجر بنجاح');
+                                          } catch (err) {
+                                            console.error("Error updating phone:", err);
+                                          }
+                                        }
+
+                                        const formattedMsg = `السلام عليكم ورحمة الله وبركاته، عزيزي المستأجر لـ شقة ${req.apartmentNumber} في ${req.buildingName}. نود إفادتكم بوجود مهمة مجدولة لـ (${req.serviceType}) بتاريخ اليوم ${format(reqDate, 'yyyy/MM/dd')}. تفضلوا بقبول وافر الاحترام والتقدير.`;
+                                        window.open(`https://wa.me/${cleanedPhone}?text=${encodeURIComponent(formattedMsg)}`, '_blank');
+                                        
+                                        setActivePhoneInputId(null);
+                                      }}
+                                      className="p-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center shrink-0"
+                                      title="تواصل وحفظ الرقم"
+                                    >
+                                      <MessageCircle size={15} />
+                                    </motion.button>
+                                    <button
+                                      onClick={() => setActivePhoneInputId(null)}
+                                      className="p-2.5 bg-gray-200 dark:bg-slate-700 text-gray-500 dark:text-slate-400 rounded-xl hover:bg-gray-300 dark:hover:bg-slate-600 flex items-center justify-center shrink-0"
+                                      title="إلغاء"
+                                    >
+                                      <X size={15} />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <motion.button
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                    onClick={() => {
+                                      setActivePhoneInputId(req.id);
+                                    }}
+                                    className="w-full py-3 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/20 dark:hover:bg-indigo-900/10 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center gap-2 text-xs font-black transition-all cursor-pointer border border-dashed border-indigo-200 dark:border-indigo-900/30"
+                                  >
+                                    <Plus size={16} />
+                                    <span>إدخال رقم وتواصل واتساب</span>
+                                  </motion.button>
                                 )}
-                              >
-                                <CreditCard size={18} />
-                              </button>
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  updateStatus(req.id, 'status', req.status === 'pending' ? 'completed' : 'pending');
-                                }}
-                                className={cn(
-                                  "px-4 py-2 rounded-full text-xs font-black uppercase transition-all",
-                                  req.status === 'completed' ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400" : 
-                                  "bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
-                                )}
-                              >
-                                {req.status === 'completed' ? '✓ تم' : '✕ لم يتم'}
-                              </button>
-                            </div>
-                          </motion.div>
-                        ))}
+                              </div>
+                            </motion.div>
+                          );
+                        })}
                       </div>
                     </motion.div>
                   );
@@ -6704,9 +10990,7 @@ function AppContent() {
               </div>
 
               <div id="maintenance-schedule" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {requests
-                  .filter(r => r.serviceType.includes('صيانة') && (statusFilter === 'all' || r.status === statusFilter))
-                  .sort((a, b) => safeToDate(b.date).getTime() - safeToDate(a.date).getTime())
+                {filteredRequests
                   .map((req) => (
                     <motion.div 
                       layout
@@ -6813,7 +11097,7 @@ function AppContent() {
                     </motion.div>
                   ))}
 
-                {requests.filter(r => r.serviceType.includes('صيانة') && (statusFilter === 'all' || r.status === statusFilter)).length === 0 && (
+                {filteredRequests.length === 0 && (
                   <div className="col-span-full py-20 text-center bg-gray-50 dark:bg-slate-800/50 rounded-[3.5rem] border-2 border-dashed border-gray-200 dark:border-slate-700">
                     <div className="w-20 h-20 bg-white dark:bg-slate-800 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-sm">
                       <Wrench size={40} className="text-gray-300" />
@@ -6898,7 +11182,7 @@ function AppContent() {
                   <div className="w-10 h-10 bg-primary/20 dark:bg-primary/30 rounded-2xl flex items-center justify-center mb-4">
                     <CheckCircle2 className="text-primary dark:text-primary" size={20} />
                   </div>
-                  <p className="text-[10px] font-black text-primary/60 dark:text-primary/60 uppercase tracking-widest">تم التوصيل في {format(globalSelectedDate, 'dd/MM')}</p>
+                  <p className="text-[10px] font-black text-primary/60 dark:text-primary/60 uppercase tracking-widest font-cairo">تم التوصيل في {format(globalSelectedDate, 'dd/MM')}</p>
                   <h3 className="text-3xl font-black text-primary dark:text-white mt-1">
                     {requests.filter(r => r.serviceType === 'توصيل مياه' && r.status === 'completed' && isSameDay(safeToDate(r.date), globalSelectedDate)).length}
                   </h3>
@@ -6908,9 +11192,9 @@ function AppContent() {
                   <div className="w-10 h-10 bg-amber-100 dark:bg-amber-800 rounded-2xl flex items-center justify-center mb-4">
                     <CreditCard className="text-amber-600 dark:text-amber-400" size={20} />
                   </div>
-                  <p className="text-[10px] font-black text-amber-600/60 dark:text-amber-400/60 uppercase tracking-widest">طلبات غير مدفوعة</p>
+                  <p className="text-[10px] font-black text-amber-600/60 dark:text-amber-400/60 uppercase tracking-widest font-cairo">طلبات غير مدفوعة للشهر</p>
                   <h3 className="text-3xl font-black text-amber-900 dark:text-amber-100 mt-1">
-                    {requests.filter(r => r.serviceType === 'توصيل مياه' && r.paymentStatus === 'unpaid').length}
+                    {requests.filter(r => r.serviceType === 'توصيل مياه' && r.paymentStatus === 'unpaid' && isSameMonth(safeToDate(r.date), selectedMonth)).length}
                   </h3>
                 </div>
 
@@ -6918,9 +11202,9 @@ function AppContent() {
                   <div className="w-10 h-10 bg-primary/20 dark:bg-primary/30 rounded-2xl flex items-center justify-center mb-4">
                     <DollarSign className="text-primary dark:text-primary" size={20} />
                   </div>
-                  <p className="text-[10px] font-black text-primary/60 dark:text-primary/60 uppercase tracking-widest">المبالغ المحصلة</p>
+                  <p className="text-[10px] font-black text-primary/60 dark:text-primary/60 uppercase tracking-widest font-cairo">المبالغ المحصلة للشهر</p>
                   <h3 className="text-3xl font-black text-primary dark:text-white mt-1">
-                    {requests.filter(r => r.serviceType === 'توصيل مياه' && r.paymentStatus === 'paid').reduce((acc, r) => acc + r.price, 0)}
+                    {requests.filter(r => r.serviceType === 'توصيل مياه' && r.paymentStatus === 'paid' && isSameMonth(safeToDate(r.date), selectedMonth)).reduce((acc, r) => acc + (Number(r.price) || 0), 0)}
                     <span className="text-sm font-bold mr-1 opacity-60">ريال</span>
                   </h3>
                 </div>
@@ -6929,9 +11213,9 @@ function AppContent() {
                   <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-800 rounded-2xl flex items-center justify-center mb-4">
                     <PieChart className="text-indigo-600 dark:text-indigo-400" size={20} />
                   </div>
-                  <p className="text-[10px] font-black text-indigo-600/60 dark:text-indigo-400/60 uppercase tracking-widest">إجمالي المبيعات</p>
+                  <p className="text-[10px] font-black text-indigo-600/60 dark:text-indigo-400/60 uppercase tracking-widest font-cairo">إجمالي مبيعات الشهر</p>
                   <h3 className="text-3xl font-black text-indigo-900 dark:text-indigo-100 mt-1">
-                    {requests.filter(r => r.serviceType === 'توصيل مياه').reduce((acc, r) => acc + r.price, 0)}
+                    {requests.filter(r => r.serviceType === 'توصيل مياه' && isSameMonth(safeToDate(r.date), selectedMonth)).reduce((acc, r) => acc + (Number(r.price) || 0), 0)}
                     <span className="text-sm font-bold mr-1 opacity-60">ريال</span>
                   </h3>
                 </div>
@@ -7008,9 +11292,7 @@ function AppContent() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50 dark:divide-slate-800">
-                        {requests
-                          .filter(r => r.serviceType === 'توصيل مياه' && (searchTerm === '' || r.apartmentNumber.includes(searchTerm)))
-                          .sort((a, b) => safeToDate(b.date).getTime() - safeToDate(a.date).getTime())
+                        {filteredRequests
                           .map(request => (
                             <motion.tr 
                               initial={{ opacity: 0 }}
@@ -7087,9 +11369,22 @@ function AppContent() {
                           >
                             <ChevronRight size={20} />
                           </button>
-                          <h3 className="text-lg font-black text-gray-900 dark:text-white min-w-[150px] text-center">
-                            {format(selectedMonth, 'MMMM yyyy', { locale: ar })}
-                          </h3>
+                          <div className="relative cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 rounded-xl px-3 py-1 transition-all">
+                            <h3 className="text-lg font-black text-gray-900 dark:text-white min-w-[150px] text-center underline decoration-dotted decoration-primary/50 underline-offset-4">
+                              {format(selectedMonth, 'MMMM yyyy', { locale: ar })}
+                            </h3>
+                            <input 
+                              type="month" 
+                              value={format(selectedMonth, 'yyyy-MM')} 
+                              onChange={(e) => {
+                                if (e.target.value) {
+                                  const [year, month] = e.target.value.split('-').map(Number);
+                                  setSelectedMonth(new Date(year, month - 1, 1));
+                                }
+                              }}
+                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                            />
+                          </div>
                           <button 
                             onClick={() => setSelectedMonth(addMonths(selectedMonth, 1))}
                             className="p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-xl transition-all"
@@ -7358,10 +11653,14 @@ function AppContent() {
                                     { id: 'تكرار الطلبات', label: 'تكرار الطلبات' },
                                     { id: 'staff', label: 'إدارة العمالة' },
                                     { id: 'club-subscriptions', label: 'اشتراكات النادي' },
+                                    { id: 'game-room-bookings', label: 'حجز غرفة الألعاب' },
                                     { id: 'bookings', label: 'إدارة الحجوزات' },
                                     { id: 'طلبات الماء', label: 'إدارة المياه والمخزون' },
                                     { id: 'طلبات الصيانة', label: 'طلبات الصيانة' },
                                     { id: 'تنظيف سيارات', label: 'تنظيف السيارات' },
+                                    { id: 'car-subscriptions', label: 'اشتراكات السيارات' },
+                                    { id: 'property-units', label: 'إدارة الوحدات' },
+                                    { id: 'tenants', label: 'العقود والمدفوعات' },
                                     ...BUILDINGS.map(b => ({ id: b, label: b }))
                                   ].map(perm => (
                                     <label key={perm.id} className="flex items-center gap-1 cursor-pointer">
@@ -7489,15 +11788,87 @@ function AppContent() {
                     </div>
                   </div>
 
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => setIsClubSubscriptionModalOpen(true)}
-                    className="flex items-center gap-3 px-8 py-4 bg-primary text-white rounded-2xl font-black text-sm shadow-xl shadow-primary/20 dark:shadow-none hover:bg-primary/90 transition-all"
-                  >
-                    <Plus size={20} />
-                    إضافة مشترك جديد
-                  </motion.button>
+                  <div className="flex flex-wrap gap-3">
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => setIsClubSubPrintModalOpen(true)}
+                      className="flex items-center gap-3 px-6 py-4 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 dark:bg-emerald-950/20 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900 rounded-2xl font-black text-sm shadow-md transition-all cursor-pointer"
+                    >
+                      <Printer size={18} />
+                      طباعة التعهد
+                    </motion.button>
+
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => setIsWhatsAppAlertsModalOpen(true)}
+                      className="flex items-center gap-3 px-6 py-4 bg-amber-50 hover:bg-amber-100 text-amber-600 dark:bg-amber-950/20 dark:text-amber-400 border border-amber-100 dark:border-amber-900 rounded-2xl font-black text-sm shadow-md transition-all cursor-pointer relative"
+                    >
+                      <BellRing size={18} />
+                      تنبيهات الانتهاء (7 أيام)
+                      {clubSubscriptions.filter(sub => {
+                        if (!sub.endDate || sub.status === 'locked') return false;
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        const end = sub.endDate instanceof Timestamp ? sub.endDate.toDate() : new Date(sub.endDate);
+                        const diffTime = end.getTime() - today.getTime();
+                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                        return diffDays >= 0 && diffDays <= 7;
+                      }).length > 0 && (
+                        <span className="absolute -top-1.5 -left-1.5 bg-rose-500 text-white font-black text-[10px] w-5 h-5 rounded-full flex items-center justify-center animate-bounce">
+                          {clubSubscriptions.filter(sub => {
+                            if (!sub.endDate || sub.status === 'locked') return false;
+                            const today = new Date();
+                            today.setHours(0, 0, 0, 0);
+                            const end = sub.endDate instanceof Timestamp ? sub.endDate.toDate() : new Date(sub.endDate);
+                            const diffTime = end.getTime() - today.getTime();
+                            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                            return diffDays >= 0 && diffDays <= 7;
+                          }).length}
+                        </span>
+                      )}
+                    </motion.button>
+
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => {
+                        const fields = [
+                          { id: 'name', label: 'اسم المشترك' },
+                          { id: 'phone', label: 'رقم الجوال' },
+                          { id: 'workplace', label: 'المبنى/الموضع' },
+                          { id: 'monthsCount', label: 'عدد الأشهر' },
+                          { id: 'totalPrice', label: 'المبلغ الإجمالي' },
+                          { id: 'collectedAmount', label: 'المبلغ المحصل' },
+                          { id: 'paymentStatus', label: 'حالة الدفع' },
+                          { id: 'startDate', label: 'تاريخ البدء' },
+                          { id: 'endDate', label: 'تاريخ الانتهاء' },
+                          { id: 'status', label: 'الحالة' }
+                        ];
+                        const activeList = clubSubscriptions.filter(sub => {
+                          if (clubSubBuildingFilter === 'all') return true;
+                          if (clubSubBuildingFilter === 'other') return !BUILDINGS.includes(sub.workplace);
+                          return sub.workplace === clubSubBuildingFilter;
+                        });
+                        exportAnyToExcel(activeList, fields, 'club_subscriptions');
+                      }}
+                      className="flex items-center gap-3 px-6 py-4 bg-emerald-600 hover:bg-emerald-750 text-white rounded-2xl font-black text-sm shadow-lg transition-all cursor-pointer border border-emerald-500/20"
+                    >
+                      <Download size={18} />
+                      تصدير إلى Excel
+                    </motion.button>
+
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => setIsClubSubscriptionModalOpen(true)}
+                      className="flex items-center gap-3 px-8 py-4 bg-primary text-white rounded-2xl font-black text-sm shadow-xl shadow-primary/20 dark:shadow-none hover:bg-primary/90 transition-all"
+                    >
+                      <Plus size={20} />
+                      إضافة مشترك جديد
+                    </motion.button>
+                  </div>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3 mb-8 pb-6 border-b dark:border-slate-800">
@@ -7648,6 +12019,16 @@ function AppContent() {
                         >
                           <Pencil size={16} strokeWidth={2.5} />
                         </motion.button>
+
+                        <motion.button
+                          whileHover={{ scale: 1.1, translateY: -2 }}
+                          onClick={() => setSelectedClubSubForPrint(sub)}
+                          className="w-10 h-10 flex items-center justify-center rounded-[1.1rem] text-emerald-600 border border-emerald-50 bg-emerald-50/40 hover:bg-emerald-100 hover:border-emerald-200 transition-all shadow-sm dark:bg-slate-800/50 dark:border-slate-700 cursor-pointer"
+                          title="طباعة التعهد وإقرار الاشتراك"
+                        >
+                          <Printer size={16} strokeWidth={2.5} />
+                        </motion.button>
+
                         <motion.button
                           whileHover={{ scale: 1.1, translateY: -2 }}
                           onClick={() => updateClubSubPaymentStatus(sub.id, sub.paymentStatus === 'paid' ? 'unpaid' : 'paid')}
@@ -7669,7 +12050,7 @@ function AppContent() {
                           تنبيه قفل الاشتراك
                         </button>
                         <button
-                          onClick={() => deleteClubSubscription(sub.id)}
+                          onClick={() => setConfirmDeleteClubSubId(sub.id)}
                           className="p-3 bg-gray-100 dark:bg-slate-800 text-gray-400 hover:text-rose-500 rounded-2xl transition-all"
                           title="حذف"
                         >
@@ -7692,6 +12073,169 @@ function AppContent() {
           )}
 
           {/* Bookings Management Tab */}
+          {activeTab === 'game-room-bookings' && (
+            <div className="space-y-8 mb-10">
+              <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-8 border border-gray-100 dark:border-slate-800 shadow-sm">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+                  <div className="flex items-center gap-5">
+                    <div className="w-14 h-14 bg-primary rounded-2xl flex items-center justify-center shadow-lg shadow-primary/20 dark:shadow-none">
+                      <Gamepad2 className="text-white" size={28} />
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">
+                        حجز غرفة الألعاب
+                      </h2>
+                      <p className="text-gray-500 dark:text-slate-400 font-bold mt-1">إدارة حجوزات غرفة الألعاب والترفيه</p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-4">
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => {
+                        const fields = [
+                          { id: 'customerName', label: 'اسم العميل' },
+                          { id: 'customerPhone', label: 'رقم الجوال' },
+                          { id: 'buildingName', label: 'المبنى' },
+                          { id: 'apartmentNumber', label: 'رقم الشقة' },
+                          { id: 'serviceType', label: 'نوع الخدمة' },
+                          { id: 'date', label: 'التاريخ' },
+                          { id: 'time', label: 'الوقت' },
+                          { id: 'status', label: 'الحالة' }
+                        ];
+                        exportAnyToExcel(gameRoomBookings, fields, 'game_room_bookings');
+                      }}
+                      className="flex items-center gap-3 px-6 py-4 bg-emerald-600 hover:bg-emerald-750 text-white rounded-2xl font-black text-sm shadow-lg transition-all cursor-pointer border border-emerald-500/20"
+                    >
+                      <Download size={18} />
+                      تصدير إلى Excel
+                    </motion.button>
+
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => setIsGameRoomModalOpen(true)}
+                      className="flex items-center gap-3 px-8 py-4 bg-primary text-white rounded-2xl font-black text-sm shadow-xl shadow-primary/20 hover:bg-primary/90 transition-all font-cairo"
+                    >
+                      <Plus size={20} />
+                      إضافة حجز جديد
+                    </motion.button>
+
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => {
+                        const bookingUrl = `${window.location.origin}${window.location.pathname}?view=book`;
+                        navigator.clipboard.writeText(bookingUrl);
+                        toast.success('تم نسخ رابط الحجز لمشاركته');
+                        window.open(`https://wa.me/?text=${encodeURIComponent('رابط حجز مرافق المجمع:\n' + bookingUrl)}`, '_blank');
+                      }}
+                      className="flex items-center gap-3 px-8 py-4 bg-[#25D366] text-white rounded-2xl font-black text-sm shadow-xl shadow-green-200 dark:shadow-none hover:bg-[#128C7E] transition-all"
+                    >
+                      <Share2 size={20} />
+                      رابط الحجز
+                    </motion.button>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right border-separate border-spacing-y-3">
+                    <thead>
+                      <tr className="text-gray-400 text-xs font-black uppercase tracking-widest">
+                        <th className="px-6 py-4">العميل</th>
+                        <th className="px-6 py-4">الموقع</th>
+                        <th className="px-6 py-4">الموعد</th>
+                        <th className="px-6 py-4">الحالة</th>
+                        <th className="px-6 py-4">الإجراءات</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {gameRoomBookings.map((booking) => (
+                        <motion.tr 
+                          key={booking.id}
+                          initial={{ opacity: 0, x: 20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          className="bg-gray-50 dark:bg-slate-800/50 hover:bg-gray-100 dark:hover:bg-slate-800 transition-all group"
+                        >
+                          <td className="px-6 py-5 rounded-r-3xl">
+                            <div className="font-black text-gray-900 dark:text-white">{booking.customerName || 'بدون اسم'}</div>
+                            <div className="text-[10px] font-bold text-gray-400">{booking.customerPhone || 'بدون رقم'}</div>
+                          </td>
+                          <td className="px-6 py-5">
+                            <div className="font-bold text-gray-700 dark:text-slate-300">{booking.buildingName}</div>
+                            <div className="text-[10px] font-black text-primary">شقة {booking.apartmentNumber}</div>
+                          </td>
+                          <td className="px-6 py-5">
+                            <div className="font-bold text-gray-700 dark:text-slate-300">{format(safeToDate(booking.date), 'yyyy/MM/dd')}</div>
+                            <div className="text-[10px] font-black text-gray-400">{booking.time}</div>
+                          </td>
+                          <td className="px-6 py-5">
+                            <span className={cn(
+                              "px-3 py-1 rounded-full text-[10px] font-black",
+                              booking.status === 'confirmed' ? "bg-emerald-100 text-emerald-600" :
+                              booking.status === 'cancelled' ? "bg-rose-100 text-rose-600" :
+                              "bg-amber-100 text-amber-600"
+                            )}>
+                              {booking.status === 'confirmed' ? 'مؤكد' : 
+                               booking.status === 'cancelled' ? 'ملغي' : 'قيد الانتظار'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-5 rounded-l-3xl">
+                            <div className="flex items-center gap-2">
+                              {booking.status === 'pending' ? (
+                                <>
+                                  <button 
+                                    onClick={() => updateBookingStatus(booking.id, 'confirmed')}
+                                    className="p-2 bg-emerald-100 text-emerald-600 rounded-xl hover:bg-emerald-200 transition-colors"
+                                    title="تأكيد"
+                                  >
+                                    <Check size={16} />
+                                  </button>
+                                  <button 
+                                    onClick={() => updateBookingStatus(booking.id, 'cancelled')}
+                                    className="p-2 bg-rose-100 text-rose-600 rounded-xl hover:bg-rose-200 transition-colors"
+                                    title="إلغاء"
+                                  >
+                                    <X size={16} />
+                                  </button>
+                                </>
+                              ) : (
+                                <button 
+                                  onClick={() => {
+                                    setEditingGameRoomBooking(booking);
+                                    setIsGameRoomModalOpen(true);
+                                  }}
+                                  className="p-2 bg-blue-100 text-blue-600 rounded-xl hover:bg-blue-200 transition-colors"
+                                  title="تعديل"
+                                >
+                                  <Pencil size={16} />
+                                </button>
+                              )}
+                              <button 
+                                onClick={() => deleteBooking(booking.id)}
+                                className="p-2 bg-gray-100 dark:bg-slate-800 text-gray-400 hover:text-rose-600 rounded-xl transition-colors"
+                                title="حذف"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          </td>
+                        </motion.tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {gameRoomBookings.length === 0 && (
+                    <div className="py-20 text-center opacity-20">
+                      <Gamepad2 size={48} className="mx-auto mb-3" />
+                      <p className="text-sm font-black">لا توجد حجوزات حالياً</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeTab === 'bookings' && (
             <div className="space-y-8 mb-10">
               <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-8 border border-gray-100 dark:border-slate-800 shadow-sm">
@@ -7876,8 +12420,15 @@ function AppContent() {
                               <Car className="text-primary" size={20} />
                             </div>
                             <div>
-                              <h4 className="font-black text-gray-900 dark:text-white">شقة {request.apartmentNumber}</h4>
-                              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{request.buildingName}</p>
+                              <h4 className="font-black text-gray-900 dark:text-white">
+                                {request.serviceType === 'تنظيف سيارات' 
+                                  ? `شقة ${getApartmentNum(request)}` 
+                                  : `شقة ${request.apartmentNumber}`}
+                              </h4>
+                              {request.serviceType === 'تنظيف سيارات' && (
+                                <p className="text-[10px] text-indigo-500 font-bold">اللوحة: {request.apartmentNumber} | {getCarName(request)}</p>
+                              )}
+                              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">{request.buildingName}</p>
                             </div>
                           </div>
                           <div className={cn(
@@ -7898,7 +12449,9 @@ function AppContent() {
                                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/photo:opacity-100 transition-opacity flex flex-col items-center justify-center gap-3">
                                     <button 
                                       onClick={() => {
-                                        const text = `📸 صورة "قبل التنظيف" لشقة ${request.apartmentNumber}:\n${request.beforePhotoUrl}`;
+                                        const aptNoStr = request.serviceType === 'تنظيف سيارات' ? getApartmentNum(request) : request.apartmentNumber;
+                                        const plateStr = request.serviceType === 'تنظيف سيارات' ? ` | لوحة: ${request.apartmentNumber}` : '';
+                                        const text = `📸 صورة "قبل التنظيف" لشقة ${aptNoStr}${plateStr}:\n${request.beforePhotoUrl}`;
                                         window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
                                       }}
                                       className="p-2 bg-[#25D366] text-white rounded-xl shadow-lg hover:scale-110 transition-transform flex items-center gap-2 text-[10px] font-black"
@@ -7942,7 +12495,9 @@ function AppContent() {
                                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/photo:opacity-100 transition-opacity flex flex-col items-center justify-center gap-3">
                                     <button 
                                       onClick={() => {
-                                        const text = `📸 صورة "بعد التنظيف" لشقة ${request.apartmentNumber}:\n${request.afterPhotoUrl}`;
+                                        const aptNoStr = request.serviceType === 'تنظيف سيارات' ? getApartmentNum(request) : request.apartmentNumber;
+                                        const plateStr = request.serviceType === 'تنظيف سيارات' ? ` | لوحة: ${request.apartmentNumber}` : '';
+                                        const text = `📸 صورة "بعد التنظيف" لشقة ${aptNoStr}${plateStr}:\n${request.afterPhotoUrl}`;
                                         window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
                                       }}
                                       className="p-2 bg-[#25D366] text-white rounded-xl shadow-lg hover:scale-110 transition-transform flex items-center gap-2 text-[10px] font-black"
@@ -7996,7 +12551,9 @@ function AppContent() {
                               const statusText = request.status === 'completed' ? '✅ تم التنفيذ' : '⏳ قيد التنفيذ';
                               const beforePhoto = request.beforePhotoUrl ? `\n📸 صورة قبل: ${request.beforePhotoUrl}` : '';
                               const afterPhoto = request.afterPhotoUrl ? `\n📸 صورة بعد: ${request.afterPhotoUrl}` : '';
-                              const text = `🚗 تفاصيل مهمة غسيل سيارة:\n\n🏢 المبنى: ${request.buildingName}\n🏠 الشقة: ${request.apartmentNumber}\n📊 الحالة: ${statusText}${beforePhoto}${afterPhoto}\n\n📝 ملاحظات: ${request.notes || 'لا يوجد'}`;
+                              const aptNoStr = request.serviceType === 'تنظيف سيارات' ? getApartmentNum(request) : request.apartmentNumber;
+                              const carInfoStr = request.serviceType === 'تنظيف سيارات' ? `\n🚗 السيارة: ${getCarName(request)}\n🏷️ اللوحة: ${request.apartmentNumber}` : '';
+                              const text = `🚗 تفاصيل مهمة غسيل سيارة:\n\n🏢 المبنى: ${request.buildingName}\n🏠 الشقة: ${aptNoStr}${carInfoStr}\n📊 الحالة: ${statusText}${beforePhoto}${afterPhoto}\n\n📝 ملاحظات: ${request.notes || 'لا يوجد'}`;
                               window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
                             }}
                             className="p-3 bg-[#25D366] text-white rounded-2xl shadow-lg hover:bg-[#128C7E] transition-all flex items-center justify-center"
@@ -8022,9 +12579,9 @@ function AppContent() {
 
           {/* Property Management Tabs */}
           {activeTab === 'property-units' && (
-            <div className="space-y-8 mb-10">
-              <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-8 border border-gray-100 dark:border-slate-800 shadow-sm">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+            <div className="space-y-6 mb-10 w-full max-w-none">
+              <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-6 lg:p-8 border border-gray-100 dark:border-slate-800 shadow-sm">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                   <div className="flex items-center gap-5">
                     <div className="w-14 h-14 bg-primary rounded-2xl flex items-center justify-center shadow-lg shadow-primary/20 dark:shadow-none">
                       <Home className="text-white" size={28} />
@@ -8093,10 +12650,23 @@ function AppContent() {
                         <input
                           type="text"
                           placeholder="بحث برقم الشقة أو المبنى..."
-                          className="w-64 pr-12 pl-6 py-2.5 bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-xl text-xs font-bold focus:ring-2 focus:ring-primary transition-all outline-none shadow-sm"
+                          className="w-64 pr-12 pl-12 py-2.5 bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-xl text-xs font-bold focus:ring-2 focus:ring-primary transition-all outline-none shadow-sm"
                           value={aptSearch}
                           onChange={(e) => setAptSearch(e.target.value)}
                         />
+                        <button
+                          type="button"
+                          onClick={startVoiceSearchApt}
+                          className={cn(
+                            "absolute left-4 top-1/2 -translate-y-1/2 p-1 rounded-full transition-all flex items-center justify-center",
+                            isListeningApt 
+                              ? "bg-rose-500 text-white animate-pulse" 
+                              : "text-gray-400 hover:text-primary hover:bg-gray-100 dark:hover:bg-slate-700/50"
+                          )}
+                          title="البحث الصوتي"
+                        >
+                          {isListeningApt ? <Mic size={16} /> : <MicOff size={16} />}
+                        </button>
                       </div>
                     </div>
 
@@ -8114,7 +12684,7 @@ function AppContent() {
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                       onClick={() => downloadApartmentTemplate()}
-                      className="flex items-center gap-2 px-4 py-2.5 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300 rounded-xl font-bold text-sm hover:bg-gray-200 transition-all"
+                      className="flex items-center gap-2 px-4 py-2.5 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300 rounded-xl font-bold text-sm hover:bg-gray-200 transition-all font-cairo"
                     >
                       <Download size={18} />
                       نموذج الوحدات
@@ -8124,10 +12694,10 @@ function AppContent() {
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                       onClick={() => aptFileInputRef.current?.click()}
-                      className="flex items-center gap-2 px-4 py-2.5 bg-blue-50 text-blue-700 rounded-xl font-bold text-sm hover:bg-blue-100 transition-all"
+                      className="flex items-center gap-2 px-4 py-2.5 bg-blue-50 text-blue-700 rounded-xl font-bold text-sm hover:bg-blue-100 transition-all font-cairo cursor-pointer"
                     >
                       <Upload size={18} />
-                      استيراد وحدات
+                      <span>استيراد وحدات</span>
                     </motion.button>
                     <input 
                       type="file" 
@@ -8136,6 +12706,44 @@ function AppContent() {
                       accept=".xlsx, .xls, .csv" 
                       className="hidden" 
                     />
+
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => setIsAptCodesModalOpen(true)}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400 rounded-xl font-bold text-sm hover:bg-amber-100 dark:hover:bg-amber-500/20 transition-all font-cairo cursor-pointer"
+                    >
+                      <Key size={18} />
+                      <span>الرموز السرية للشقق</span>
+                    </motion.button>
+
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => {
+                        const fields = [
+                          { id: 'buildingName', label: 'المبنى' },
+                          { id: 'number', label: 'رقم الشقة' },
+                          { id: 'status', label: 'الحالة' },
+                          { id: 'roomType', label: 'نوع الوحدة' }
+                        ];
+                        const activeList = apartments.filter(apt => {
+                          const b = PROPERTY_BUILDINGS.find(pb => pb.id === apt.buildingId);
+                          const searchLower = aptSearch.toLowerCase();
+                          const matchesSearch = apt.number.toLowerCase().includes(searchLower) || 
+                                               apt.buildingName.toLowerCase().includes(searchLower) ||
+                                               (b && b.name.toLowerCase().includes(searchLower));
+                          const matchesBuilding = aptBuildingFilter === 'all' || apt.buildingId === aptBuildingFilter;
+                          const matchesStatus = aptStatusFilter === 'all' || apt.status === aptStatusFilter;
+                          return matchesSearch && matchesBuilding && matchesStatus;
+                        });
+                        exportAnyToExcel(activeList, fields, 'apartments_units');
+                      }}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-xl font-black text-sm hover:bg-emerald-700 transition-all cursor-pointer"
+                    >
+                      <Download size={18} />
+                      تصدير الوحدات (Excel)
+                    </motion.button>
 
                     {apartments.length === 0 && isAdmin && (
                       <button 
@@ -8147,215 +12755,269 @@ function AppContent() {
                     )}
                   </div>
                 </div>
+              </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
-                  {apartments
-                    .filter(apt => {
-                      const b = PROPERTY_BUILDINGS.find(pb => pb.id === apt.buildingId);
-                      const searchLower = aptSearch.toLowerCase();
-                      
-                      // Search check
-                      const matchesSearch = apt.number.includes(aptSearch) || 
-                                           (b?.name || '').toLowerCase().includes(searchLower);
-                      
-                      // Status check
-                      const matchesStatus = aptStatusFilter === 'all' || apt.status === aptStatusFilter;
-                      
-                      // Building check
-                      const matchesBuilding = aptBuildingFilter === 'all' || apt.buildingId === aptBuildingFilter;
-
-                      return matchesSearch && matchesStatus && matchesBuilding;
-                    })
-                    .sort((a, b) => {
-                      const b1 = PROPERTY_BUILDINGS.findIndex(pb => pb.id === a.buildingId);
-                      const b2 = PROPERTY_BUILDINGS.findIndex(pb => pb.id === b.buildingId);
-                      if (b1 !== b2) return b1 - b2;
-                      return a.number.localeCompare(b.number);
-                    }).map(apt => {
+              {/* Seamless Full-Width Cards Grid (6 Columns on Desktop) */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-5">
+                {apartments
+                  .filter(apt => {
                     const b = PROPERTY_BUILDINGS.find(pb => pb.id === apt.buildingId);
-                    const tenant = (apt.tenantId ? tenants.find(t => t.id === apt.tenantId) : null) || tenants.find(t => t.apartmentId === apt.id);
-                    const num = apt.number;
-                    const floor = Math.floor(parseInt(num) / 100);
+                    const searchLower = aptSearch.toLowerCase();
                     
-                    return (
-                      <motion.div 
-                        key={apt.id}
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        whileHover={{ y: -5, boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)' }}
-                        onClick={() => {
-                          if (apt.status === 'occupied' && tenant) {
-                            setTenantSearch(tenant.name);
-                            setActiveTab('tenants');
-                          } else if (apt.status === 'vacant') {
-                            setEditingTenant(null);
-                            setTenantForm({
-                              name: '',
-                              nationality: '',
-                              phone: '',
-                              company: '',
-                              idNumber: '',
-                              contractValue: 0,
-                              paymentFrequency: 'monthly',
-                              paymentMethod: 'cash',
-                              buildingName: b?.name || '',
-                              apartmentId: apt.id,
-                              aptNumber: num
-                            } as any);
-                            setIsTenantModalOpen(true);
-                          }
-                        }}
-                        className={cn(
-                          "relative rounded-[2.5rem] p-6 flex flex-col items-center justify-between transition-all cursor-pointer border min-h-[340px]",
-                          "bg-[#111827] dark:bg-[#030712] border-slate-800 shadow-2xl overflow-hidden group"
-                        )}
-                      >
+                    // Search check
+                    const matchesSearch = apt.number.includes(aptSearch) || 
+                                         (b?.name || '').toLowerCase().includes(searchLower);
+                    
+                    // Status check
+                    const matchesStatus = aptStatusFilter === 'all' || apt.status === aptStatusFilter;
+                    
+                    // Building check
+                    const matchesBuilding = aptBuildingFilter === 'all' || apt.buildingId === aptBuildingFilter;
+
+                    return matchesSearch && matchesStatus && matchesBuilding;
+                  })
+                  .sort((a, b) => {
+                    const b1 = PROPERTY_BUILDINGS.findIndex(pb => pb.id === a.buildingId);
+                    const b2 = PROPERTY_BUILDINGS.findIndex(pb => pb.id === b.buildingId);
+                    if (b1 !== b2) return b1 - b2;
+                    return a.number.localeCompare(b.number);
+                  }).map(apt => {
+                  const b = PROPERTY_BUILDINGS.find(pb => pb.id === apt.buildingId);
+                  const tenant = (apt.tenantId ? tenants.find(t => t.id === apt.tenantId) : null) || tenants.find(t => t.apartmentId === apt.id);
+                  const num = apt.number;
+                  const floor = Math.floor(parseInt(num) / 100);
+                  
+                  return (
+                    <motion.div 
+                      key={apt.id}
+                      initial={{ opacity: 0, y: 15 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      whileHover={{ 
+                        y: -6, 
+                        scale: 1.02,
+                        boxShadow: '0 20px 30px -10px rgba(0,0,0,0.5), 0 10px 15px -10px rgba(0,0,0,0.3)',
+                        borderColor: 'rgba(20, 184, 166, 0.25)'
+                      }}
+                      transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+                      onClick={() => {
+                        if (apt.status === 'occupied' && tenant) {
+                          setTenantSearch(tenant.name);
+                          setActiveTab('tenants');
+                        } else if (apt.status === 'vacant') {
+                          setEditingTenant(null);
+                          setTenantForm({
+                            name: '',
+                            nationality: '',
+                            phone: '',
+                            company: '',
+                            idNumber: '',
+                            contractValue: 0,
+                            paymentFrequency: 'monthly',
+                            paymentMethod: 'cash',
+                            buildingName: b?.name || '',
+                            apartmentId: apt.id,
+                            aptNumber: num
+                          } as any);
+                          setIsTenantModalOpen(true);
+                        }
+                      }}
+                      className={cn(
+                        "relative rounded-[2rem] p-4 flex flex-col items-center justify-between transition-all cursor-pointer border min-h-[352px] select-none",
+                        "bg-gradient-to-b from-[#1b253b] to-[#111828] dark:from-[#0d1322] dark:to-[#05080e]",
+                        "border-t border-t-white/10 border-x border-x-white/5 border-b-[6px] border-b-[#0b0f19] dark:border-b-[#020407] shadow-xl overflow-hidden group"
+                      )}
+                    >
+                      {/* Hover Actions Panel (Top Left) */}
+                      <div className="absolute top-4 left-4 flex gap-1.5 z-30 transition-all opacity-0 group-hover:opacity-100">
+                        {/* Delete Unit */}
                         <motion.button
-                          whileHover={{ scale: 1.2, backgroundColor: 'rgba(244, 63, 94, 0.1)' }}
+                          whileHover={{ scale: 1.1 }}
                           whileTap={{ scale: 0.9 }}
                           onClick={(e) => {
                             e.stopPropagation();
                             deleteApartment(apt.id, apt.number);
                           }}
-                          className="absolute top-6 left-6 z-30 p-2.5 text-rose-400 bg-slate-800/50 rounded-xl border border-slate-700/50 hover:text-rose-500 transition-all shadow-lg backdrop-blur-sm"
+                          className="w-7 h-7 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/35 flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all shadow-sm"
                           title="حذف الوحدة"
                         >
-                          <Trash2 size={18} />
+                          <Trash2 size={12} />
                         </motion.button>
-
-                        {/* Selection Checkbox */}
-                        <div 
+                        
+                        {/* Selector/Pencil toggle */}
+                        <motion.button
+                          whileHover={{ scale: 1.1 }}
+                          whileTap={{ scale: 0.9 }}
                           onClick={(e) => {
                             e.stopPropagation();
                             toggleAptSelection(apt.id);
                           }}
                           className={cn(
-                            "absolute top-6 left-20 z-30 w-10 h-10 rounded-xl border-2 flex items-center justify-center transition-all cursor-pointer",
+                            "w-7 h-7 rounded-full border flex items-center justify-center transition-all shadow-sm",
                             selectedAptIds.includes(apt.id) 
-                              ? "bg-blue-500 border-blue-400 text-white shadow-[0_0_15px_rgba(59,130,246,0.5)]" 
-                              : "bg-slate-800/50 border-slate-700/50 text-transparent hover:border-blue-500/50"
+                              ? "bg-teal-500 border-teal-500 text-white" 
+                              : "bg-slate-800/80 text-slate-300 border-slate-700 hover:bg-slate-700"
+                          )}
+                          title="تحديد الوحدة"
+                        >
+                          <Pencil size={11} />
+                        </motion.button>
+                      </div>
+
+                      {/* Status Pill (Top Right) */}
+                      <div className="absolute top-4 right-4 z-20">
+                        <motion.button
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            const newStatus = apt.status === 'vacant' ? 'occupied' : 'vacant';
+                            try {
+                              await updateDoc(doc(db, 'apartments', apt.id), { 
+                                status: newStatus,
+                                updatedAt: serverTimestamp() 
+                              });
+                              toast.success(`تم تغيير الحالة إلى ${newStatus === 'vacant' ? 'شاغرة' : 'مشغولة'}`);
+                            } catch (error) {
+                              toast.error('خطأ في تحديث الحالة');
+                            }
+                          }}
+                          className={cn(
+                            "px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border transition-all cursor-pointer",
+                            apt.status === 'occupied' 
+                              ? "bg-teal-500/10 text-[#0d9488] border-teal-500/20 shadow-[0_2px_8px_rgba(20,184,166,0.1)]" 
+                              : "bg-indigo-500/10 text-indigo-300 border-indigo-500/20 shadow-[0_2px_8px_rgba(99,102,241,0.1)]"
                           )}
                         >
-                          <div className={cn(
-                            "w-4 h-4 rounded-full border-2 transition-all",
-                            selectedAptIds.includes(apt.id) ? "bg-white border-white scale-110" : "border-slate-600"
-                          )} />
-                        </div>
+                          {apt.status === 'occupied' ? 'مشغولة' : 'شاغرة'}
+                        </motion.button>
+                      </div>
 
-                        {/* Status Pill */}
-                        <div className="absolute top-6 right-6 z-20">
-                          <button
-                            onClick={async (e) => {
-                              e.stopPropagation();
-                              const newStatus = apt.status === 'vacant' ? 'occupied' : 'vacant';
-                              try {
-                                await updateDoc(doc(db, 'apartments', apt.id), { 
-                                  status: newStatus,
-                                  updatedAt: serverTimestamp() 
-                                });
-                                toast.success(`تم تغيير الحالة إلى ${newStatus === 'vacant' ? 'شاغرة' : 'مشغولة'}`);
-                              } catch (error) {
-                                toast.error('خطأ في تحديث الحالة');
-                              }
-                            }}
-                            className={cn(
-                              "px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all hover:scale-110 active:scale-95 cursor-pointer shadow-lg",
-                              apt.status === 'occupied' ? "bg-emerald-500 text-white shadow-emerald-500/20" :
-                              apt.status === 'maintenance' ? "bg-rose-500 text-white shadow-rose-500/20" :
-                              "bg-blue-500 text-white shadow-blue-500/20"
-                            )}
-                          >
-                            {apt.status === 'occupied' ? 'مشغولة' : apt.status === 'maintenance' ? 'صيانة' : 'شاغرة'}
-                          </button>
+                      {/* Building/Icon Header */}
+                      <div className="flex flex-col items-center gap-1 select-none mt-4">
+                        <div className="w-10 h-10 rounded-full bg-slate-800/40 border border-white/5 flex items-center justify-center shadow-inner">
+                          <HomeIcon size={16} className="text-slate-400 group-hover:text-teal-400 transition-colors duration-300" />
                         </div>
-
-                        {/* Buildling/Icon Header */}
-                        <div className="flex flex-col items-center gap-2 mt-4">
-                          <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center border border-white/10 shadow-inner">
-                            <HomeIcon size={24} className="text-slate-400" />
-                          </div>
-                          <div className="text-center">
-                            <h4 className="text-[10px] font-black tracking-[0.2em] text-slate-500 uppercase">North Residence</h4>
-                            <p className="text-[10px] font-bold text-slate-600 mt-0.5">{b?.name || 'مبنى'}</p>
-                          </div>
+                        <div className="text-center mt-1">
+                          <h4 className="text-[9px] font-black tracking-wide text-slate-500 uppercase">North Residence</h4>
+                          <p className="text-[8px] font-bold text-slate-400 mt-0">{b?.name || 'مبنى 1'}</p>
                         </div>
+                      </div>
 
-                        {/* Giant Unit Number */}
-                        <div className="relative my-4">
-                          <span className="text-7xl font-black text-white tracking-tighter drop-shadow-[0_0_20px_rgba(255,255,255,0.15)] leading-none block">
-                            {num}
+                      {/* Giant Number */}
+                      <div className="relative my-2 select-none">
+                        <span 
+                          style={{ 
+                            textShadow: '0 4px 10px rgba(0,0,0,0.5), 0 10px 20px rgba(59,130,246,0.15)'
+                          }}
+                          className="text-5xl sm:text-6xl font-black text-white tracking-tight hover:scale-105 transition-transform duration-300 leading-none block"
+                        >
+                          {num}
+                        </span>
+                        {/* Subtle Ambient Glow */}
+                        <div className="absolute inset-0 bg-teal-500/5 blur-[35px] rounded-full -z-10" />
+                      </div>
+
+                      {/* Floor/Type Badges Side-By-Side */}
+                      <div className="flex items-center gap-1.5 justify-center mb-1 bg-slate-900/40 px-2.5 py-1 rounded-full border border-white/5">
+                        <span className="text-[8px] text-slate-400 font-bold">الدور {floor}</span>
+                        <div className="w-1 h-1 bg-slate-700 rounded-full" />
+                        <span className="text-[8px] text-slate-400 font-bold">شقة</span>
+                      </div>
+
+                      {/* Secret Code Badge if present */}
+                      {apt.secretCode && (
+                        <div className="mt-1 px-3 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-mono font-bold flex items-center justify-center gap-1 rounded-lg">
+                          <Lock size={10} className="text-amber-400" />
+                          <span>رمز: {apt.secretCode}</span>
+                        </div>
+                      )}
+
+                      {/* Tenant Info */}
+                      <div className="w-full text-center h-5 flex items-center justify-center mt-1">
+                        {tenant ? (
+                          <span className="text-[10px] font-black text-slate-300 truncate tracking-wide max-w-full px-2" title={tenant.name}>
+                            {tenant.name}
                           </span>
-                          {/* Subtle Glow Effect */}
-                          <div className="absolute inset-0 bg-blue-500/5 blur-[40px] rounded-full -z-10" />
-                        </div>
+                        ) : (
+                          <span className="text-[10px] font-bold text-slate-600/40">شاغرة</span>
+                        )}
+                      </div>
 
-                        {/* Floor/Type Badges */}
-                        <div className="flex gap-2">
-                          <div className="px-3 py-1 rounded-xl bg-white/5 border border-white/5 text-[9px] font-black text-slate-400">
-                            شقة
-                          </div>
-                          <div className="px-3 py-1 rounded-xl bg-white/5 border border-white/5 text-[9px] font-black text-slate-400">
-                            الدور {floor}
-                          </div>
-                        </div>
-
-                        {/* Tenant Info */}
-                        <div className="w-full text-center mt-3">
-                          <p className="text-[11px] font-bold text-slate-300 truncate h-4">
-                            {tenant ? tenant.company || tenant.name : 'شاغرة حالياً'}
-                          </p>
-                        </div>
-
-                        {/* Action Icons Row */}
-                        <div className="flex items-center gap-4 mt-6">
-                          <div 
+                      {/* Action Icons Row (Circular, layout correct to image) */}
+                      <div className="flex items-center justify-center gap-2.5 mt-2.5 w-full">
+                        {/* WhatsApp / DND notification */}
+                        <div className="flex flex-col items-center">
+                          <motion.div 
+                            whileHover={tenant?.phone ? { y: -1, scale: 1.05 } : {}}
+                            whileTap={tenant?.phone ? { y: 1, scale: 0.95 } : {}}
                             onClick={(e) => {
                               e.stopPropagation();
                               if (tenant?.phone) {
-                                window.open(`https://wa.me/${tenant.phone.replace(/\s+/g, '')}`, '_blank');
+                                setSelectedWhatsAppTenant(tenant);
+                                setIsWhatsAppModalOpen(true);
                               } else {
                                 toast.error('لا يوجد رقم هاتف مسجل لهذا الساكن');
                               }
                             }}
                             className={cn(
-                              "w-10 h-10 rounded-2xl border flex flex-col items-center justify-center group/btn transition-all cursor-pointer",
+                              "w-9 h-9 rounded-full border flex items-center justify-center transition-all cursor-pointer shadow-xs",
                               tenant?.phone 
-                                ? "bg-green-500/10 border-green-500/20 hover:bg-green-500/20" 
-                                : "bg-white/5 border-white/5 opacity-40 grayscale"
+                                ? "bg-slate-800/40 border-slate-700 text-slate-300 hover:border-green-500/40 hover:text-green-400 hover:shadow-green-500/5" 
+                                : "bg-slate-800/20 border-slate-800 text-slate-600 opacity-30 pointer-events-none"
                             )}
                             title={tenant?.phone ? `واتساب: ${tenant.phone}` : "لا يوجد رقم هاتف"}
                           >
-                            <MessageCircle size={14} className={tenant?.phone ? "text-green-400" : "text-slate-500"} />
-                            <span className={cn(
-                              "text-[7px] font-black mt-1",
-                              tenant?.phone ? "text-green-500/70" : "text-slate-600"
-                            )}>WHATSAPP</span>
-                          </div>
-                          <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 flex flex-col items-center justify-center group/btn hover:bg-emerald-500/30 transition-colors">
-                            <UserCheck size={18} className="text-emerald-400" />
-                            <span className="text-[8px] font-black mt-1 text-emerald-500/70">CHECK IN</span>
-                          </div>
-                          <div className="w-10 h-10 rounded-2xl bg-white/5 border border-white/5 flex flex-col items-center justify-center group/btn hover:bg-white/10 transition-colors">
-                            <Sparkles size={14} className="text-slate-500 group-hover/btn:text-emerald-400 transition-colors" />
-                            <span className="text-[7px] font-black mt-1 text-slate-600">CLEAN</span>
-                          </div>
+                            <MessageCircle size={14} />
+                          </motion.div>
+                          <span className="text-[6.5px] font-black text-slate-500 mt-1 select-none">DND</span>
                         </div>
 
-                        {/* Footer Button */}
-                        <div onClick={(e) => {
-                          e.stopPropagation();
-                          // Simulated doorbell
-                        }} className="w-full mt-6 py-4 rounded-[1.5rem] bg-white/5 border border-white/10 hover:bg-white/10 transition-all flex items-center justify-center gap-3 group/door">
-                          <span className="text-[10px] font-black tracking-widest text-slate-400 group-hover/door:text-white transition-colors uppercase">Doorbell</span>
-                          <div className="relative">
-                            <Bell size={16} className="text-slate-500 group-hover/door:text-white transition-colors" />
-                            <div className="absolute top-0 right-0 w-1.5 h-1.5 bg-rose-500 rounded-full animate-ping" />
-                          </div>
+                        {/* Check-In */}
+                        <div className="flex flex-col items-center">
+                          <motion.div 
+                            whileHover={{ y: -1, scale: 1.05 }}
+                            whileTap={{ y: 1, scale: 0.95 }}
+                            className={cn(
+                              "w-10 h-10 rounded-full border flex items-center justify-center transition-all shadow-md cursor-pointer",
+                              tenant 
+                                ? "bg-indigo-500/10 border-indigo-500/30 text-indigo-400" 
+                                : "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                            )}
+                          >
+                            <UserCheck size={15} />
+                          </motion.div>
+                          <span className="text-[6.5px] font-black text-slate-500 mt-0.5 select-none">CHECK IN</span>
                         </div>
-                      </motion.div>
-                    );
-                  })}
-                </div>
+
+                        {/* Clean status */}
+                        <div className="flex flex-col items-center">
+                          <motion.div 
+                            whileHover={{ y: -1, scale: 1.05 }}
+                            whileTap={{ y: 1, scale: 0.95 }}
+                            className="w-9 h-9 rounded-full bg-slate-800/40 border border-slate-700/50 text-slate-400 hover:text-white hover:border-amber-500/40 hover:text-amber-400 flex items-center justify-center transition-all cursor-pointer shadow-xs"
+                          >
+                            <Sparkles size={13} />
+                          </motion.div>
+                          <span className="text-[6.5px] font-black text-slate-500 mt-1 select-none">CLEAN</span>
+                        </div>
+                      </div>
+
+                      {/* Interactive tactile push Doorbell */}
+                      <motion.button 
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ y: 1, scale: 0.98 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toast.success("🔔 تم رن جرس الباب!");
+                        }} 
+                        className="w-full mt-3 py-2 px-4 rounded-full bg-slate-800/40 hover:bg-slate-800 border border-white/5 active:translate-y-[1px] transition-all flex items-center justify-center gap-2 group/door cursor-pointer shadow-sm"
+                      >
+                        <span className="text-[9px] font-black tracking-widest text-slate-400 group-hover/door:text-white transition-colors uppercase">Doorbell</span>
+                        <Bell size={13} className="text-slate-500 group-hover/door:text-white transition-colors" />
+                      </motion.button>
+                    </motion.div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -8487,6 +13149,42 @@ function AppContent() {
                     >
                       <Upload size={20} />
                       استيراد
+                    </motion.button>
+
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => {
+                        const fields = [
+                          { id: 'name', label: 'اسم المستأجر' },
+                          { id: 'phone', label: 'الجوال' },
+                          { id: 'nationality', label: 'الجنسية' },
+                          { id: 'idNumber', label: 'رقم الهوية' },
+                          { id: 'company', label: 'الجهة/الشركة' },
+                          { id: 'contractValue', label: 'قيمة العقد' },
+                          { id: 'collectedAmount', label: 'المبلغ المحصل' },
+                          { id: 'paymentFrequency', label: 'طريقة الدفع/التكرار' },
+                          { id: 'paymentMethod', label: 'وسيلة الدفع' },
+                          { id: 'startDate', label: 'بداية العقد' },
+                          { id: 'endDate', label: 'نهاية العقد' }
+                        ];
+                        const filteredTenants = tenants
+                          .filter(t => t.status === tenantFilter)
+                          .filter(t => {
+                            const aptDetails = apartments.find(a => a.id === t.apartmentId);
+                            const matchesSearch = t.name.toLowerCase().includes(tenantSearch.toLowerCase()) ||
+                              t.phone.toLowerCase().includes(tenantSearch.toLowerCase()) ||
+                              (aptDetails && aptDetails.number.toLowerCase().includes(tenantSearch.toLowerCase()));
+                            const matchesBuilding = tenantBuildingFilter === 'all' || 
+                              (aptDetails && aptDetails.buildingId === tenantBuildingFilter);
+                            return matchesSearch && matchesBuilding;
+                          });
+                        exportAnyToExcel(filteredTenants, fields, 'tenants_contracts');
+                      }}
+                      className="flex items-center gap-3 px-6 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-sm border-2 border-emerald-500/20 shadow-md transition-all font-cairo cursor-pointer"
+                    >
+                      <Download size={20} />
+                      تصدير العقود (Excel)
                     </motion.button>
                   </div>
                 </div>
@@ -8706,6 +13404,37 @@ function AppContent() {
                                   <DollarSign size={18} strokeWidth={2.5} />
                                 </motion.button>
                                 
+                                {tenant.status === 'archived' && (
+                                  <motion.button
+                                    whileHover={{ scale: 1.1, translateY: -2 }}
+                                    onClick={async () => {
+                                      if (confirm('هل أنت متأكد من استعادة هذا العقد؟ سيتم تفعيل العقد مرة أخرى.')) {
+                                        try {
+                                          await updateDoc(doc(db, 'tenants', tenant.id), { status: 'active' });
+                                          // Check if the apartment is vacant and re-assign if so
+                                          if (tenant.apartmentId) {
+                                            const aptSnap = await getDoc(doc(db, 'apartments', tenant.apartmentId));
+                                            if (aptSnap.exists() && aptSnap.data().status === 'vacant') {
+                                              await updateDoc(doc(db, 'apartments', tenant.apartmentId), { 
+                                                status: 'occupied',
+                                                tenantId: tenant.id
+                                              });
+                                            }
+                                          }
+                                          toast.success('تمت استعادة العقد بنجاح');
+                                        } catch (error) {
+                                          console.error(error);
+                                          toast.error('حدث خطأ أثناء الاستعادة');
+                                        }
+                                      }
+                                    }}
+                                    className="w-11 h-11 flex items-center justify-center rounded-[1.25rem] text-emerald-600 border border-emerald-50 bg-emerald-50/40 hover:bg-emerald-100 hover:border-emerald-200 transition-all shadow-sm dark:bg-slate-800/50 dark:border-slate-700"
+                                    title="استعادة"
+                                  >
+                                    <RotateCcw size={18} strokeWidth={2.5} />
+                                  </motion.button>
+                                )}
+
                                 {tenant.status !== 'archived' && (
                                   <motion.button
                                     whileHover={{ scale: 1.1, translateY: -2 }}
@@ -8775,92 +13504,7 @@ function AppContent() {
             </div>
           )}
 
-          {activeTab === 'property-alerts' && (
-            <div className="space-y-8 mb-10">
-              <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-8 border border-gray-100 dark:border-slate-800 shadow-sm">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
-                  <div className="flex items-center gap-5">
-                    <div className="w-14 h-14 bg-rose-500 rounded-2xl flex items-center justify-center shadow-lg shadow-rose-200 dark:shadow-none">
-                      <Bell className="text-white" size={28} />
-                    </div>
-                    <div>
-                      <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">
-                        تنبيهات العقود
-                      </h2>
-                      <p className="text-gray-500 dark:text-slate-400 font-bold mt-1">متابعة العقود التي قاربت على الانتهاء (خلال 30 يوم)</p>
-                    </div>
-                  </div>
-                </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {getExpiringContracts(30).map(tenant => {
-                    const apt = apartments.find(a => a.id === tenant.apartmentId);
-                    const building = PROPERTY_BUILDINGS.find(b => b.id === apt?.buildingId);
-                    const daysLeft = differenceInDays(safeToDate(tenant.endDate), new Date());
-                    const color = daysLeft < 0 ? "rose" : daysLeft <= 7 ? "rose" : "amber";
-
-                    return (
-                      <motion.div 
-                        key={tenant.id}
-                        whileHover={{ scale: 1.02 }}
-                        className={cn(
-                          "p-6 rounded-[2rem] border-2 flex flex-col gap-4 transition-all",
-                          color === 'rose' ? "bg-rose-50 border-rose-100 dark:bg-rose-900/10 dark:border-rose-900/20" : "bg-amber-50 border-amber-100 dark:bg-amber-900/10 dark:border-amber-900/20"
-                        )}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className={cn(
-                            "w-10 h-10 rounded-xl flex items-center justify-center",
-                            color === 'rose' ? "bg-rose-500 text-white" : "bg-amber-500 text-white"
-                          )}>
-                            <AlertCircle size={20} />
-                          </div>
-                          <span className={cn(
-                            "px-3 py-1 rounded-full text-[10px] font-black",
-                            color === 'rose' ? "bg-rose-100 text-rose-600" : "bg-amber-100 text-amber-600"
-                          )}>
-                            {daysLeft < 0 ? 'منتهي' : `${daysLeft} يوم متبقي`}
-                          </span>
-                        </div>
-                        
-                        <div>
-                          <h4 className="font-black text-gray-900 dark:text-white">{tenant.name}</h4>
-                          <p className="text-[10px] font-bold text-gray-400 mt-1">
-                            {building?.name} • شقة {apt?.number}
-                          </p>
-                        </div>
-
-                        <div className="pt-4 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between">
-                          <div className="text-[10px] font-bold text-gray-500">تاريخ الانتهاء:</div>
-                          <div className="text-xs font-black text-gray-700 dark:text-slate-300">
-                            {format(safeToDate(tenant.endDate), 'yyyy/MM/dd')}
-                          </div>
-                        </div>
-
-                        <button 
-                          onClick={() => window.open(`https://wa.me/${tenant.phone}?text=${encodeURIComponent(`عزيزي ${tenant.name}، نود تذكيركم بأن عقد إيجار الشقة رقم ${apt?.number} في ${building?.name} سينتهي بتاريخ ${format(safeToDate(tenant.endDate), 'yyyy/MM/dd')}. يرجى التواصل معنا للتجديد.`)}`, '_blank')}
-                          className={cn(
-                            "w-full py-3 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-2",
-                            color === 'rose' ? "bg-rose-500 text-white hover:bg-rose-600" : "bg-amber-500 text-white hover:bg-amber-600"
-                          )}
-                        >
-                          <MessageCircle size={16} />
-                          تذكير عبر واتساب
-                        </button>
-                      </motion.div>
-                    );
-                  })}
-
-                  {getExpiringContracts(30).length === 0 && (
-                    <div className="col-span-full py-20 text-center opacity-20">
-                      <Bell size={48} className="mx-auto mb-3" />
-                      <p className="text-sm font-black">لا توجد تنبيهات حالياً</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
           {/* Today's Car Cleaning Alerts */}
           {activeTab === 'تنظيف سيارات' && activeTab !== 'staff' && (
             <div className="mb-10 space-y-6">
@@ -8871,27 +13515,30 @@ function AppContent() {
                   </div>
                   <div>
                     <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">
-                      جدول غسيل السيارات
+                      جدول غسيل السيارات (المهام اليومية)
                     </h2>
                     <p className="text-gray-500 dark:text-slate-400 font-bold mt-1">
-                      {format(new Date(), 'dd MMMM yyyy', { locale: ar })}
+                      {format(globalSelectedDate, 'dd MMMM yyyy', { locale: ar })}
                     </p>
                   </div>
                 </div>
               </div>
               
-              {filteredRequests.filter(req => isSameDay(safeToDate(req.date), globalSelectedDate)).length > 0 ? (
+              {carCleaningDailyRequests.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {filteredRequests
-                    .filter(req => isSameDay(safeToDate(req.date), globalSelectedDate))
-                    .map((req) => (
+                  {carCleaningDailyRequests.map((req) => {
+                    const isTaskCompleted = req.isSubscription 
+                      ? (req.completedDates || []).includes(format(globalSelectedDate, 'yyyy-MM-dd'))
+                      : req.status === 'completed';
+                      
+                    return (
                       <motion.div 
                         initial={{ opacity: 0, scale: 0.95 }}
                         animate={{ opacity: 1, scale: 1 }}
                         key={req.id}
                         className={cn(
                           "p-5 rounded-[2rem] border-2 flex items-center justify-between transition-all",
-                          req.status === 'completed' 
+                          isTaskCompleted 
                             ? "bg-emerald-50 border-emerald-100 text-emerald-800 dark:bg-emerald-900/20 dark:border-emerald-900/30 dark:text-emerald-400" 
                             : "bg-amber-50 border-amber-100 text-amber-800 shadow-lg shadow-amber-100/50 dark:bg-amber-900/20 dark:border-amber-900/30 dark:text-amber-400 dark:shadow-none"
                         )}
@@ -8899,7 +13546,7 @@ function AppContent() {
                         <div className="flex items-center gap-4">
                           <div className={cn(
                             "w-12 h-12 rounded-2xl flex items-center justify-center transition-all",
-                            req.status === 'completed' ? "bg-emerald-200 text-emerald-700" : "bg-amber-600 text-white"
+                            isTaskCompleted ? "bg-emerald-200 text-emerald-700" : "bg-amber-600 text-white"
                           )}>
                             <Car size={24} />
                           </div>
@@ -8907,7 +13554,14 @@ function AppContent() {
                             <p className="text-xs font-bold opacity-70 mb-0.5">رقم اللوحة</p>
                             <div className="flex items-center gap-2">
                               <p className="text-lg font-black tracking-wider">{req.apartmentNumber}</p>
-                              <span className="text-xs font-black bg-white/50 dark:bg-black/20 px-2 py-0.5 rounded-lg">{format(safeToDate(req.date), 'p', { locale: ar })}</span>
+                              <span className="text-xs font-black bg-white/50 dark:bg-black/20 px-2 py-0.5 rounded-lg">
+                                {req.isSubscription ? (
+                                  <div className="flex items-center gap-1">
+                                    <CalendarCheck size={10} />
+                                    <span>اشتراك</span>
+                                  </div>
+                                ) : format(safeToDate(req.date), 'p', { locale: ar })}
+                              </span>
                             </div>
                             <motion.div 
                               whileHover={{ scale: 1.05 }}
@@ -8931,17 +13585,16 @@ function AppContent() {
                             whileHover={{ scale: 1.05 }}
                             whileTap={{ scale: 0.95 }}
                             onClick={() => {
-                              const nextStatus = req.status === 'pending' ? 'completed' : 'pending';
-                              updateStatus(req.id, 'status', nextStatus);
+                              toggleDailyCompletion(req, globalSelectedDate);
                             }}
                             className="text-left"
                           >
                             <p className="text-[10px] font-bold opacity-70 uppercase mb-1">الحالة</p>
                             <span className={cn(
                               "px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all",
-                              req.status === 'completed' ? "bg-green-200 text-green-800" : "bg-orange-200 text-orange-800"
+                              isTaskCompleted ? "bg-green-200 text-green-800" : "bg-orange-200 text-orange-800"
                             )}>
-                              {req.status === 'completed' ? '✓ تم التنفيذ' : '✕ لم يتم التنفيذ'}
+                              {isTaskCompleted ? '✓ تم التنفيذ' : '✕ لم يتم التنفيذ'}
                             </span>
                           </motion.button>
                           <div className="flex items-center gap-1">
@@ -8967,14 +13620,269 @@ function AppContent() {
                           </div>
                         </div>
                       </motion.div>
-                    ))
-                  }
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="bg-gray-50 p-8 rounded-[2rem] border border-dashed border-gray-200 text-center">
                   <p className="text-gray-400 font-bold">لا توجد سيارات مجدولة للغسيل اليوم</p>
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'car-subscriptions' && (
+            <div className="mb-10 space-y-6">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-primary rounded-2xl flex items-center justify-center shadow-lg shadow-primary/20 dark:shadow-none">
+                    <CalendarPlus className="text-white" size={24} />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">
+                      إدارة اشتراكات غسيل السيارات
+                    </h2>
+                    <p className="text-gray-500 dark:text-slate-400 font-bold mt-1">
+                      متابعة وإضافة اشتراكات غسيل السيارات الشهرية
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={importCarSubscriptionsFromImage}
+                    className="flex items-center gap-2 px-4 py-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-2xl font-bold text-sm transition-all focus:outline-none cursor-pointer"
+                  >
+                    <ImageIcon size={18} />
+                    <span>تغذية الصورة (محاكاة)</span>
+                  </motion.button>
+
+                  <label className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-sm shadow-xl shadow-emerald-200 dark:shadow-none transition-all focus:outline-none cursor-pointer">
+                    <ImageIcon size={18} />
+                    <span>تحليل وإدخال من صورة 📸</span>
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      onChange={handleUploadAndAnalyzeImage} 
+                      className="hidden" 
+                    />
+                  </label>
+
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => {
+                      setIsSubscriptionModalOpen(true);
+                    }}
+                    className="flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-2xl font-black text-sm shadow-xl shadow-primary/20 transition-all focus:outline-none"
+                  >
+                    <CalendarPlus size={18} />
+                    <span>طلب اشتراك جديد</span>
+                  </motion.button>
+                </div>
+              </div>
+
+              {/* Monthly Subscriptions Section */}
+              <div className="space-y-4 mb-10">
+                <h3 className="text-lg font-black text-gray-900 dark:text-white flex items-center gap-2">
+                  <div className="w-1.5 h-6 bg-emerald-500 rounded-full" />
+                  الاشتراكات النشطة حالياً
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {requests
+                    .filter(req => req.serviceType === 'تنظيف سيارات' && req.isSubscription && safeToDate(req.subscriptionEndDate) > new Date())
+                    .map(sub => {
+                      const totalDays = differenceInDays(safeToDate(sub.subscriptionEndDate), safeToDate(sub.subscriptionStartDate || sub.date));
+                      const daysLeft = differenceInDays(safeToDate(sub.subscriptionEndDate), new Date());
+                      const durationMonths = sub.monthsCount || 1;
+                      
+                      return (
+                        <motion.div 
+                          key={sub.id}
+                          layout
+                          className="bg-white dark:bg-slate-800 p-5 rounded-[2rem] border border-emerald-100 dark:border-emerald-900/30 shadow-sm flex flex-col justify-between"
+                        >
+                          <div>
+                            <div className="flex items-center justify-between mb-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/40 rounded-xl flex items-center justify-center text-emerald-600 shrink-0">
+                                  <Car size={20} />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <h4 className="font-black text-gray-900 dark:text-white truncate">شقة {getApartmentNum(sub)}</h4>
+                                    <span className="px-2 py-0.5 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 text-[10px] font-black rounded-lg whitespace-nowrap" dir="ltr">
+                                      لوحة: {sub.apartmentNumber}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] font-black text-gray-500 mt-1 truncate">
+                                    {getCarName(sub)}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex flex-col items-end gap-2 shrink-0">
+                                <span className={cn(
+                                  "px-2.5 py-1 rounded-full text-[9px] font-black whitespace-nowrap",
+                                  daysLeft <= 3 ? "bg-rose-100 text-rose-600" : "bg-emerald-100 text-emerald-600"
+                                )}>
+                                  {daysLeft <= 0 ? 'منتهي' : `متبقي ${daysLeft} يوم`}
+                                </span>
+                                <div className="flex items-center gap-1">
+                                  <motion.button
+                                    whileHover={{ scale: 1.1 }}
+                                    whileTap={{ scale: 0.9 }}
+                                    onClick={() => {
+                                      setEditingRequest(sub);
+                                      setIsSubscriptionModalOpen(true);
+                                    }}
+                                    className="p-1.5 text-gray-400 hover:text-primary transition-colors"
+                                    title="تعديل"
+                                  >
+                                    <Edit2 size={14} />
+                                  </motion.button>
+                                  <motion.button
+                                    whileHover={{ scale: 1.1 }}
+                                    whileTap={{ scale: 0.9 }}
+                                    onClick={() => setConfirmDeleteId(sub.id)}
+                                    className="p-1.5 text-gray-400 hover:text-rose-500 transition-colors"
+                                    title="حذف"
+                                  >
+                                    <Trash2 size={14} />
+                                  </motion.button>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Details list */}
+                            <div className="space-y-2 mt-4 mb-4 border-t border-b border-gray-50 dark:border-slate-700/50 py-3">
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="text-gray-400 dark:text-gray-400 font-bold">العامل المسؤول:</span>
+                                <span className="text-gray-900 dark:text-white font-black">{sub.workerName || 'غير معين'}</span>
+                              </div>
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="text-gray-400 dark:text-gray-400 font-bold">جدول الأيام:</span>
+                                <span className="text-gray-900 dark:text-white font-black truncate max-w-[180px]" title={getScheduleDaysArabic(sub.subscriptionSchedule)}>
+                                  {getScheduleDaysArabic(sub.subscriptionSchedule)}
+                                </span>
+                              </div>
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="text-gray-400 dark:text-gray-400 font-bold">قيمة الاشتراك:</span>
+                                <span className="text-emerald-600 dark:text-emerald-400 font-black">{sub.price} ريال ({sub.monthsCount} أشهر)</span>
+                              </div>
+                            </div>
+
+                            {/* Monthly Payment Status Box */}
+                            <div className="mt-3 mb-4 bg-slate-50 dark:bg-slate-900/40 p-3 rounded-2xl border border-slate-100 dark:border-slate-800/60">
+                              <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 mb-2 text-right">الأشهر المدفوعة ومتابعة السداد:</p>
+                              <div className="flex flex-wrap gap-1.5 justify-start text-right" dir="rtl">
+                                {(() => {
+                                  let displayPayments = sub.subscriptionPayments;
+                                  if (displayPayments === undefined || displayPayments === null) {
+                                    // Generate on the fly for old entries without saved payments
+                                    const start = safeToDate(sub.subscriptionStartDate || sub.date);
+                                    const end = safeToDate(sub.subscriptionEndDate);
+                                    const generated: { monthKey: string; monthName: string; isPaid: boolean; amount: number; paidDate?: string }[] = [];
+                                    let curr = startOfMonth(start);
+                                    const tEnd = startOfMonth(end);
+                                    const perMonthAmount = Math.round(sub.price / (sub.monthsCount || 1));
+                                    while (curr <= tEnd) {
+                                      generated.push({
+                                        monthKey: format(curr, 'yyyy-MM'),
+                                        monthName: format(curr, 'MMMM yyyy', { locale: ar }),
+                                        isPaid: false,
+                                        amount: perMonthAmount,
+                                        paidDate: ''
+                                      });
+                                      curr = addMonths(curr, 1);
+                                    }
+                                    displayPayments = generated;
+                                  }
+
+                                  return displayPayments.map(p => {
+                                    const shortName = p.monthName.split(' ')[0] || p.monthKey;
+                                    return (
+                                      <div 
+                                        key={p.monthKey}
+                                        className={cn(
+                                          "px-2.5 py-1 rounded-xl text-[9px] font-black flex items-center gap-1 border-b-[2px] transition-all cursor-pointer",
+                                          p.isPaid 
+                                            ? "bg-emerald-500/10 text-emerald-600 border-b-emerald-800 border border-emerald-500/20" 
+                                            : "bg-rose-500/10 text-rose-600 border-b-rose-800 border border-rose-500/20 hover:bg-rose-500/20"
+                                        )}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setSelectedSubscriptionForPayments(sub);
+                                        }}
+                                        title={`${p.monthName}: ${p.amount} ريال (${p.isPaid ? 'مدفوع' : 'غير مدفوع'})`}
+                                      >
+                                        <span>{shortName}</span>
+                                        <span className="opacity-80">({p.amount}ر)</span>
+                                        <span className="font-sans font-black">{p.isPaid ? '✓' : '✗'}</span>
+                                      </div>
+                                    );
+                                  });
+                                })()}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="space-y-3">
+                            <div className="flex justify-between items-center text-[10px] font-black">
+                              <div className="flex flex-col">
+                                <span className="text-gray-400">تاريخ الانتهاء</span>
+                                <span className="text-gray-700 dark:text-slate-300 font-black">
+                                  {format(safeToDate(sub.subscriptionEndDate), 'dd/MM/yyyy')}
+                                </span>
+                              </div>
+                              
+                              <div className="flex items-center gap-1.5">
+                                <motion.button
+                                  whileHover={{ scale: 1.05 }}
+                                  whileTap={{ scale: 0.95 }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedSubscriptionForPayments(sub);
+                                  }}
+                                  className="px-2.5 py-1.5 bg-emerald-500/10 hover:bg-emerald-650 hover:text-white text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-xl font-black text-[10px] flex items-center gap-1 shadow-sm cursor-pointer transition-colors"
+                                >
+                                  <CreditCard size={11} />
+                                  <span>من دفع؟</span>
+                                </motion.button>
+
+                                <motion.button
+                                  whileHover={{ scale: 1.05 }}
+                                  whileTap={{ scale: 0.95 }}
+                                  onClick={() => setSelectedSubscriptionDetail(sub)}
+                                  className="px-2.5 py-1.5 bg-primary/10 text-primary rounded-xl font-black text-[10px] flex items-center gap-1 hover:bg-primary hover:text-white transition-all shadow-sm cursor-pointer"
+                                >
+                                  <ListTodo size={12} />
+                                  <span>جدول الغسيل</span>
+                                </motion.button>
+                              </div>
+                            </div>
+                            <div className="w-full h-1.5 bg-gray-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                              <motion.div 
+                                initial={{ width: 0 }}
+                                animate={{ width: `${Math.max(0, Math.min(100, (daysLeft / totalDays) * 100))}%` }}
+                                className={cn(
+                                  "h-full rounded-full transition-all",
+                                  daysLeft <= 3 ? "bg-rose-500" : "bg-emerald-500"
+                                )}
+                              />
+                            </div>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  {requests.filter(req => req.serviceType === 'تنظيف سيارات' && req.isSubscription && safeToDate(req.subscriptionEndDate) > new Date()).length === 0 && (
+                    <div className="col-span-full py-20 text-center bg-gray-50/50 dark:bg-slate-800/10 rounded-[2rem] border border-dashed border-gray-100 dark:border-slate-800">
+                      <CalendarPlus size={48} className="mx-auto text-gray-300 mb-4" />
+                      <p className="text-gray-400 text-sm font-bold">لا توجد اشتراكات شهرية نشطة حالياً</p>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
@@ -9031,11 +13939,18 @@ function AppContent() {
                             <Home size={24} />
                           </div>
                           <div>
-                            <p className="text-xs font-bold opacity-70 mb-0.5">رقم الشقة</p>
-                            <div className="flex items-center gap-2">
-                              <p className="text-lg font-black tracking-wider">{req.apartmentNumber}</p>
+                            <p className="text-xs font-bold opacity-70 mb-0.5">بيانات الشقة والسيارة</p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="text-lg font-black tracking-wider">
+                                شقة {req.serviceType === 'تنظيف سيارات' ? getApartmentNum(req) : req.apartmentNumber}
+                              </p>
                               <span className="text-xs font-black bg-white/50 dark:bg-black/20 px-2 py-0.5 rounded-lg">{format(safeToDate(req.date), 'p', { locale: ar })}</span>
                             </div>
+                            {req.serviceType === 'تنظيف سيارات' && (
+                              <p className="text-[11px] font-bold text-indigo-500 mt-0.5">
+                                اللوحة: {req.apartmentNumber} | السيارة: {getCarName(req)}
+                              </p>
+                            )}
                             <motion.div 
                               whileHover={{ scale: 1.05 }}
                               whileTap={{ scale: 0.95 }}
@@ -9085,18 +14000,20 @@ function AppContent() {
 
           {/* Requests Table/List/Calendar */}
           {activeTab !== 'طلبات الماء' && activeTab !== 'staff' && (
-            <div className="bg-box dark:bg-slate-900 rounded-[2.5rem] shadow-sm border border-gray-100 dark:border-slate-800 overflow-hidden transition-colors duration-300">
-            <div className="p-8 border-b dark:border-slate-800 flex flex-col sm:flex-row justify-between items-center gap-4">
-              <div className="flex items-center gap-4">
-                <h3 className="text-xl font-black text-gray-900 dark:text-white">
+            <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-xl shadow-slate-100/10 dark:shadow-none border border-gray-100/80 dark:border-slate-800 overflow-hidden transition-all duration-300">
+            <div className="p-8 border-b border-gray-100 dark:border-slate-800/80 flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-6">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                <h3 className="text-xl font-black text-gray-900 dark:text-white font-cairo">
                   {viewMode === 'list' ? 'سجل الطلبات التفصيلي' : viewMode === 'summary' ? 'ملخص الشقق' : 'تقويم الطلبات'}
                 </h3>
-                <div className="flex bg-gray-100 dark:bg-slate-800 p-1 rounded-xl">
+                <div className="flex bg-gray-50 dark:bg-slate-800 p-1.5 rounded-[1.25rem] border border-gray-100 dark:border-slate-700/50 w-fit">
                   <button 
                     onClick={() => setViewMode('list')}
                     className={cn(
-                      "px-4 py-2 rounded-lg text-xs font-bold transition-all",
-                      viewMode === 'list' ? "bg-white dark:bg-slate-700 text-primary shadow-sm" : "text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200"
+                      "px-4 py-2 rounded-xl text-xs font-black transition-all",
+                      viewMode === 'list' 
+                        ? "bg-white dark:bg-slate-700 text-primary dark:text-white shadow-sm" 
+                        : "text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200"
                     )}
                   >
                     عرض القائمة
@@ -9104,8 +14021,10 @@ function AppContent() {
                   <button 
                     onClick={() => setViewMode('summary')}
                     className={cn(
-                      "px-4 py-2 rounded-lg text-xs font-bold transition-all",
-                      viewMode === 'summary' ? "bg-white dark:bg-slate-700 text-primary shadow-sm" : "text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200"
+                      "px-4 py-2 rounded-xl text-xs font-black transition-all",
+                      viewMode === 'summary' 
+                        ? "bg-white dark:bg-slate-700 text-primary dark:text-white shadow-sm" 
+                        : "text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200"
                     )}
                   >
                     ملخص الشقق
@@ -9113,250 +14032,317 @@ function AppContent() {
                   <button 
                     onClick={() => setViewMode('calendar')}
                     className={cn(
-                      "px-4 py-2 rounded-lg text-xs font-bold transition-all",
-                      viewMode === 'calendar' ? "bg-white dark:bg-slate-700 text-primary shadow-sm" : "text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200"
+                      "px-4 py-2 rounded-xl text-xs font-black transition-all",
+                      viewMode === 'calendar' 
+                        ? "bg-white dark:bg-slate-700 text-primary dark:text-white shadow-sm" 
+                        : "text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200"
                     )}
                   >
                     التقويم
                   </button>
                 </div>
               </div>
-              <div className="flex gap-2">
-                <div className="flex items-center gap-2 px-3 py-1 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 rounded-full text-xs font-bold">
-                  <div className="w-2 h-2 bg-primary rounded-full" />
-                  مدفوع: {stats.paid}
+              <div className="flex flex-wrap gap-3 items-center">
+                <motion.button 
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => requestsFileInputRef.current?.click()}
+                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-black shadow-md transition-all cursor-pointer border border-emerald-500/20 mr-1"
+                >
+                  <Upload size={14} />
+                  <span>استرداد البيانات من Excel</span>
+                </motion.button>
+                <input 
+                  type="file" 
+                  ref={requestsFileInputRef} 
+                  onChange={handleImportRequests} 
+                  accept=".xlsx, .xls" 
+                  className="hidden" 
+                />
+                <div className="flex items-center gap-2.5 px-4 py-2 bg-emerald-50/80 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 rounded-2xl text-xs font-black border border-emerald-100/30">
+                  <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full inline-block animate-pulse" />
+                  <span>مدفوع: {stats.paid} ريال</span>
                 </div>
-                <div className="flex items-center gap-2 px-3 py-1 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded-full text-xs font-bold">
-                  <div className="w-2 h-2 bg-amber-500 rounded-full" />
-                  معلق: {stats.unpaid}
+                <div className="flex items-center gap-2.5 px-4 py-2 bg-amber-50/80 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 rounded-2xl text-xs font-black border border-amber-100/30">
+                  <span className="w-2.5 h-2.5 bg-amber-500 rounded-full inline-block" />
+                  <span>معلق: {stats.unpaid} ريال</span>
                 </div>
               </div>
             </div>
-
-            <div className="overflow-x-auto">
+ 
+            <div className="overflow-x-auto custom-scrollbar">
               {viewMode === 'list' ? (
-                <table className="w-full text-right">
+                <table className="w-full text-right border-collapse">
                   <thead>
-                    <tr className="bg-slate-50/50 dark:bg-slate-800/50 text-gray-500 dark:text-slate-500 text-xs font-black uppercase tracking-widest text-center">
-                      <th className="px-4 py-3">رقم الشقة</th>
-                      <th className="px-4 py-3">الخدمة</th>
-                      <th className="px-4 py-3">التاريخ</th>
-                      <th className="px-4 py-3">العدد</th>
-                      <th className="px-4 py-3">المبلغ</th>
-                      <th className="px-4 py-3">الحالة</th>
-                      <th className="px-4 py-3">التحصيل</th>
-                      <th className="px-4 py-3">الإيصال</th>
-                      <th className="px-4 py-3">إجراءات</th>
+                    <tr className="bg-gray-50/70 dark:bg-slate-800/30 text-slate-400 dark:text-slate-500 text-[11px] font-black uppercase tracking-wider border-b border-gray-100 dark:border-slate-800/50">
+                      <th className="px-6 py-5 text-right font-cairo">رقم الشقة</th>
+                      <th className="px-6 py-5 text-right font-cairo">الخدمة</th>
+                      <th className="px-6 py-5 text-right font-cairo">التاريخ</th>
+                      <th className="px-6 py-5 text-center font-cairo">العدد</th>
+                      <th className="px-6 py-5 text-center font-cairo">المبلغ</th>
+                      <th className="px-6 py-5 text-center font-cairo">الحالة</th>
+                      <th className="px-6 py-5 text-center font-cairo">التحصيل</th>
+                      <th className="px-6 py-5 text-center font-cairo">الإيصال</th>
+                      <th className="px-6 py-5 text-center font-cairo">إجراءات</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-50 dark:divide-slate-800">
+                  <tbody className="divide-y divide-gray-100/50 dark:divide-slate-800/50">
                     <AnimatePresence mode="popLayout">
-                      {Object.keys(groupedRequests).length > 0 ? (
-                        Object.entries(groupedRequests).map(([key, groupData]) => {
-                          const group = groupData as CleaningRequest[];
-                          const sortedGroup = [...group].sort((a, b) => safeToDate(b.date).getTime() - safeToDate(a.date).getTime());
-                          const displayReq = sortedGroup[0];
-                          const hasMultiple = group.length > 1;
-
+                      {groupedFilteredRequests.length > 0 ? (
+                        groupedFilteredRequests.map((group) => {
+                          const displayReq = group.latest;
+                          const hasMultiple = group.count > 1;
+ 
+                          // Custom color palettes for services
+                          let serviceBadgeClass = "bg-slate-50 text-slate-700 dark:bg-slate-800 dark:text-slate-300";
+                          if (displayReq.serviceType.includes('سيارات')) {
+                            serviceBadgeClass = "bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 border border-indigo-100/30 dark:border-indigo-900/20";
+                          } else if (displayReq.serviceType.includes('عادي') || displayReq.serviceType.includes('شقق')) {
+                            serviceBadgeClass = "bg-sky-50 dark:bg-sky-950/30 text-sky-600 dark:text-sky-400 border border-sky-100/30 dark:border-sky-900/20";
+                          } else if (displayReq.serviceType.includes('صيانة')) {
+                            serviceBadgeClass = "bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border border-amber-100/30 dark:border-amber-900/20";
+                          } else if (displayReq.serviceType.includes('مياه')) {
+                            serviceBadgeClass = "bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 border border-blue-100/30 dark:border-blue-900/20";
+                          } else if (displayReq.serviceType.includes('ألعاب')) {
+                            serviceBadgeClass = "bg-purple-50 dark:bg-purple-950/30 text-purple-600 dark:text-purple-400 border border-purple-100/30 dark:border-purple-900/20";
+                          }
+ 
                           return (
                             <motion.tr 
-                              key={key}
+                              key={displayReq.id}
                               layout
                               initial={{ opacity: 0, y: 10 }}
                               animate={{ opacity: 1, y: 0 }}
                               exit={{ opacity: 0, scale: 0.95 }}
-                              whileHover={{ scale: 1.01 }}
-                              className={cn(
-                                "hover:bg-primary/5 dark:hover:bg-primary/10 transition-colors text-center cursor-pointer",
-                                hasMultiple && "bg-gray-50/50 dark:bg-slate-800/30"
-                              )}
+                              whileHover={{ backgroundColor: "rgba(241, 245, 249, 0.4)" }}
+                              className="transition-colors text-center cursor-pointer border-b border-gray-100/50 dark:border-slate-800/40 relative group/row"
                               onClick={() => {
                                 if (hasMultiple) {
-                                  setSelectedHistoryGroup(sortedGroup);
+                                  const groupRequests = filteredRequests.filter(r => 
+                                    r.buildingName === displayReq.buildingName && 
+                                    r.apartmentNumber === displayReq.apartmentNumber && 
+                                    r.serviceType === displayReq.serviceType &&
+                                    isSameMonth(safeToDate(r.date), safeToDate(displayReq.date))
+                                  );
+                                  setSelectedHistoryGroup(groupRequests);
                                 }
                               }}
                             >
-                              <td className="px-4 py-3">
-                                <div className="flex items-center justify-center gap-2">
-                                  <div className="bg-primary/10 dark:bg-primary/20 p-1.5 rounded-lg text-primary">
-                                    <Home size={16} />
+                              <td className="px-6 py-4 text-right">
+                                <div className="flex items-center gap-3">
+                                  <div className="bg-primary/5 dark:bg-primary/20 p-2.5 rounded-2xl text-primary transition-transform group-hover/row:scale-110">
+                                    <Home size={18} />
                                   </div>
                                   <div className="text-right">
-                                    <p className="font-bold text-gray-900 dark:text-white text-sm">شقة {displayReq.apartmentNumber}</p>
-                                    <p className="text-[10px] text-gray-500 dark:text-slate-400">{displayReq.buildingName}</p>
-                                    {hasMultiple && (
-                                      <div className="flex items-center gap-1 text-[10px] font-black text-indigo-600 mt-1">
-                                        <ListTodo size={10} />
-                                        <span>{group.length} طلبات مسجلة</span>
-                                      </div>
+                                    <p className="font-black text-gray-900 dark:text-white text-sm font-cairo">
+                                      {displayReq.serviceType === 'تنظيف سيارات' 
+                                        ? `شقة ${getApartmentNum(displayReq)}` 
+                                        : `شقة ${displayReq.apartmentNumber}`}
+                                    </p>
+                                    {displayReq.serviceType === 'تنظيف سيارات' && (
+                                      <p className="text-[10px] text-indigo-500 font-bold mt-0.5">
+                                        اللوحة: {displayReq.apartmentNumber} | {getCarName(displayReq)}
+                                      </p>
                                     )}
+                                    <p className="text-[10px] text-gray-400 dark:text-slate-500 font-bold mt-0.5">{displayReq.buildingName}</p>
                                   </div>
                                 </div>
                               </td>
-                              <td className="px-4 py-3">
-                                <span className="font-bold text-gray-700 dark:text-slate-300 text-sm">{displayReq.serviceType}</span>
-                                {hasMultiple ? (
-                                  <div className="text-[10px] text-indigo-500 font-black mt-1">
-                                    انقر لعرض السجل الكامل
-                                  </div>
-                                ) : (
-                                  <div className="text-[10px] text-primary font-black mt-1">
-                                    وقت الطلب: {displayReq.createdAt ? format(safeToDate(displayReq.createdAt), 'p', { locale: ar }) : '-'}
+                              <td className="px-6 py-4 text-right">
+                                <span className={cn("px-3 py-1.5 rounded-xl font-black text-xs inline-block", serviceBadgeClass)}>
+                                  {displayReq.serviceType}
+                                </span>
+                                {hasMultiple && (
+                                  <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-black mt-1">
+                                    {group.count} طلبات مجمعة
                                   </div>
                                 )}
+                                <div className="text-[10px] text-gray-400 dark:text-slate-500 font-medium mt-1">
+                                  وقت الطلب: {displayReq.createdAt ? format(safeToDate(displayReq.createdAt), 'p', { locale: ar }) : '-'}
+                                </div>
                               </td>
-                              <td className="px-4 py-3">
-                                <p className="text-xs font-medium text-gray-600 dark:text-slate-400">
-                                  {hasMultiple ? 'سجل الطلبات' : format(safeToDate(displayReq.date), 'PPP', { locale: ar })}
+                              <td className="px-6 py-4 text-right">
+                                <p className="text-xs font-bold text-gray-800 dark:text-slate-300">
+                                  {format(safeToDate(displayReq.date), 'PPP', { locale: ar })}
                                 </p>
-                                {!hasMultiple && (
-                                  <p className="text-[10px] text-gray-400 dark:text-slate-500">{format(safeToDate(displayReq.date), 'p', { locale: ar })}</p>
-                                )}
+                                <p className="text-[10px] text-gray-400 dark:text-slate-500 font-medium mt-0.5">{format(safeToDate(displayReq.date), 'p', { locale: ar })}</p>
                               </td>
-                              <td className="px-4 py-3">
-                                <span className="font-bold text-gray-700 dark:text-slate-300 text-sm">
-                                  {hasMultiple ? '-' : (displayReq.serviceType === 'توصيل مياه' ? (displayReq.waterGallons || 0) : displayReq.monthsCount)}
+                              <td className="px-6 py-4 text-center">
+                                <span className="px-3 py-1 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-gray-100 dark:border-slate-700/55 rounded-xl font-bold text-xs inline-block min-w-8">
+                                  {displayReq.serviceType === 'توصيل مياه' ? group.totalWaterGallons : (hasMultiple ? group.count : displayReq.monthsCount)}
                                 </span>
                               </td>
-                              <td className="px-4 py-3">
-                                <span className="text-base font-black text-primary">
-                                  {hasMultiple ? group.reduce((sum, r) => sum + r.price, 0) : displayReq.price} ريال
-                                </span>
-                                {hasMultiple && <p className="text-[10px] text-gray-400 font-bold">إجمالي المبالغ</p>}
+                              <td className="px-6 py-4 text-center">
+                                <div className="inline-flex items-baseline gap-1 font-cairo">
+                                  <span className="text-base font-black text-slate-850 dark:text-white">
+                                    {group.totalPrice}
+                                  </span>
+                                  <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500">ريال</span>
+                                </div>
                               </td>
-                              <td className="px-4 py-3">
-                                {hasMultiple ? (
-                                  <div className="flex flex-col items-center gap-1">
-                                    <span className="text-[10px] font-bold text-orange-600">
-                                      {group.filter(r => r.status === 'pending').length} قيد التنفيذ
-                                    </span>
-                                    <span className="text-[10px] font-bold text-green-600">
-                                      {group.filter(r => r.status === 'completed').length} مكتمل
-                                    </span>
-                                  </div>
-                                ) : (
-                                  <motion.button 
-                                    whileHover={{ scale: 1.05 }}
-                                    whileTap={{ scale: 0.95 }}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
+                              <td className="px-6 py-4 text-center">
+                                <motion.button 
+                                  whileHover={{ scale: 1.05 }}
+                                  whileTap={{ scale: 0.95 }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (hasMultiple) {
+                                      // Toggle all in group
+                                      const nextStatus = group.allCompleted ? 'pending' : 'completed';
+                                      group.ids.forEach(id => updateStatus(id, 'status', nextStatus));
+                                    } else {
                                       const nextStatus = displayReq.status === 'pending' ? 'completed' : 'pending';
                                       updateStatus(displayReq.id, 'status', nextStatus);
-                                    }}
-                                    className={cn(
-                                      "flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all mx-auto",
-                                      displayReq.status === 'completed' ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400" : 
-                                      "bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
-                                    )}
-                                  >
-                                    {displayReq.status === 'completed' ? <CheckCircle2 size={12} /> : <Clock size={12} />}
-                                    {displayReq.status === 'completed' ? '✓ تم التنفيذ' : '✕ لم يتم التنفيذ'}
-                                  </motion.button>
-                                )}
+                                    }
+                                  }}
+                                  className={cn(
+                                    "flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[11px] font-black shadow-sm transition-all mx-auto border",
+                                    group.allCompleted 
+                                      ? "bg-emerald-500 text-white border-emerald-600/20" 
+                                      : "bg-amber-500 text-white border-amber-600/20"
+                                  )}
+                                >
+                                  {group.allCompleted ? <CheckCircle2 size={13} /> : <Clock size={13} />}
+                                  <span>{group.allCompleted ? 'منفذة ' : 'قيد التنفيذ'}</span>
+                                </motion.button>
                               </td>
-                              <td className="px-4 py-3">
-                                {hasMultiple ? (
-                                  <div className="flex flex-col items-center gap-1">
-                                    <span className="text-[10px] font-bold text-rose-600">
-                                      {group.filter(r => r.paymentStatus === 'unpaid').length} لم يدفع
-                                    </span>
-                                    <span className="text-[10px] font-bold text-emerald-600">
-                                      {group.filter(r => r.paymentStatus === 'paid').length} مدفوع
-                                    </span>
-                                  </div>
-                                ) : (
+                              <td className="px-6 py-4 text-center">
+                                <div className="flex items-center justify-center gap-1.5 mx-auto">
                                   <motion.button 
                                     whileHover={{ scale: 1.05 }}
                                     whileTap={{ scale: 0.95 }}
-                                    onClick={(e) => {
+                                    onClick={async (e) => {
                                       e.stopPropagation();
-                                      updateStatus(displayReq.id, 'paymentStatus', displayReq.paymentStatus === 'unpaid' ? 'paid' : 'unpaid');
+                                      if (hasMultiple) {
+                                        const nextStatus = group.allPaid ? 'unpaid' : 'paid';
+                                        for (const id of group.ids) {
+                                          await updateStatus(id, 'paymentStatus', nextStatus, true);
+                                        }
+                                      } else {
+                                        updateStatus(displayReq.id, 'paymentStatus', displayReq.paymentStatus === 'paid' ? 'unpaid' : 'paid');
+                                      }
                                     }}
                                     className={cn(
-                                      "flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all mx-auto",
-                                      displayReq.paymentStatus === 'paid' ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400" : "bg-rose-100 text-rose-700 dark:bg-rose-900/20 dark:text-rose-400"
+                                      "flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[11px] font-black shadow-sm transition-all border shrink-0",
+                                      group.allPaid 
+                                        ? "bg-teal-50 dark:bg-teal-950/20 text-teal-700 dark:text-teal-400 border-teal-200/50" 
+                                        : "bg-rose-50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-450 border-rose-200/50"
                                     )}
                                   >
-                                    <CreditCard size={12} />
-                                    {displayReq.paymentStatus === 'paid' ? 'تم الدفع' : 'لم يدفع'}
+                                    <CreditCard size={13} />
+                                    <span>{group.allPaid ? 'تم الدفع' : 'لم يدفع'}</span>
                                   </motion.button>
-                                )}
+
+                                  <motion.button
+                                    whileHover={{ scale: 1.1 }}
+                                    whileTap={{ scale: 0.9 }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const aptNum = displayReq.serviceType === 'تنظيف سيارات' ? getApartmentNum(displayReq) : displayReq.apartmentNumber;
+                                      const apt = apartments.find(a => a.buildingName === displayReq.buildingName && a.number === aptNum);
+                                      const tenant = apt ? tenants.find(t => t.id === apt.tenantId) : null;
+                                      
+                                      const dateStr = format(safeToDate(displayReq.date), 'yyyy/MM/dd');
+                                      const msg = `أهلاً بك، تم تأكيد وصول دفعتك بمبلغ ${group.totalPrice} ريال لطلب ${displayReq.serviceType} بتاريخ ${dateStr}`;
+                                      
+                                      if (tenant && tenant.phone) {
+                                        let cleanPhone = tenant.phone.trim();
+                                        if (cleanPhone.startsWith('0')) {
+                                          cleanPhone = '966' + cleanPhone.substring(1);
+                                        } else if (!cleanPhone.startsWith('+') && !cleanPhone.startsWith('966')) {
+                                          cleanPhone = '966' + cleanPhone;
+                                        }
+                                        window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(msg)}`, '_blank');
+                                      } else {
+                                        window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
+                                      }
+                                    }}
+                                    className="p-2 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 rounded-full transition-all border border-emerald-200/30 shrink-0"
+                                    title="إرسال تأكيد الدفع عبر الواتساب"
+                                  >
+                                    <MessageCircle size={13} />
+                                  </motion.button>
+                                </div>
                               </td>
-                              <td className="px-4 py-3">
-                                {!hasMultiple && (
-                                  <div className="flex items-center justify-center gap-1">
-                                    <label className="cursor-pointer p-1.5 hover:bg-white dark:hover:bg-slate-800 hover:shadow-md rounded-lg text-gray-400 dark:text-slate-500 hover:text-primary transition-all">
-                                      <input 
-                                        type="file" 
-                                        className="hidden" 
-                                        accept="image/*"
-                                        onChange={(e) => {
-                                          const file = e.target.files?.[0];
-                                          if (file) handleReceiptUpload(displayReq.id, file);
-                                        }}
-                                      />
-                                      <Upload size={18} />
-                                    </label>
-                                    {displayReq.receiptUrl && (
-                                      <button 
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          window.open(displayReq.receiptUrl, '_blank');
-                                        }}
-                                        className="p-1.5 hover:bg-white dark:hover:bg-slate-800 hover:shadow-md rounded-lg text-emerald-500 hover:text-emerald-600 transition-all"
-                                      >
-                                        <FileText size={18} />
-                                      </button>
-                                    )}
-                                  </div>
-                                )}
+                              <td className="px-6 py-4 text-center">
+                                <div className="flex items-center justify-center gap-2">
+                                  {!hasMultiple && (
+                                    <>
+                                      <label className="cursor-pointer p-2 hover:bg-slate-50 dark:hover:bg-slate-800 hover:shadow-sm rounded-xl text-slate-400 hover:text-primary dark:text-slate-500 dark:hover:text-primary transition-all border border-gray-100 dark:border-slate-800">
+                                        <input 
+                                          type="file" 
+                                          className="hidden" 
+                                          accept="image/*"
+                                          onChange={(e) => {
+                                            const file = e.target.files?.[0];
+                                            if (file) handleReceiptUpload(displayReq.id, file);
+                                          }}
+                                        />
+                                        <Upload size={16} />
+                                      </label>
+                                      {displayReq.receiptUrl && (
+                                        <button 
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            window.open(displayReq.receiptUrl, '_blank');
+                                          }}
+                                          className="p-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/50 text-emerald-600 rounded-xl transition-all border border-emerald-100 dark:border-emerald-900/40"
+                                          title="عرض الإيصال"
+                                        >
+                                          <FileText size={16} />
+                                        </button>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
                               </td>
-                              <td className="px-4 py-3">
-                                <div className="flex items-center justify-center gap-1">
+                              <td className="px-6 py-4 text-center">
+                                <div className="flex items-center justify-center gap-2">
                                   {hasMultiple ? (
                                     <motion.button 
-                                      whileHover={{ scale: 1.1 }}
-                                      whileTap={{ scale: 0.9 }}
-                                      onClick={() => setSelectedHistoryGroup(sortedGroup)}
-                                      className="px-3 py-1.5 bg-primary/10 dark:bg-primary/20 text-primary rounded-xl text-[10px] font-black hover:bg-primary/20 transition-all"
+                                      whileHover={{ scale: 1.05 }}
+                                      className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700/80 text-primary dark:text-slate-300 font-extrabold text-[10px] rounded-lg border border-gray-150 dark:border-slate-700"
                                     >
-                                      عرض التفاصيل
+                                      عرض التفاصيل ({group.count})
                                     </motion.button>
                                   ) : (
                                     <>
                                       <motion.button 
                                         whileHover={{ scale: 1.1, rotate: 5 }}
-                                        whileTap={{ scale: 0.9 }}
+                                        whileTap={{ scale: 0.95 }}
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           setEditingRequest(displayReq);
                                           setIsModalOpen(true);
                                         }}
-                                        className="p-1.5 hover:bg-white dark:hover:bg-slate-800 hover:shadow-md rounded-lg text-gray-400 dark:text-slate-500 hover:text-primary transition-all"
+                                        className="p-2 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/30 dark:hover:bg-blue-950/50 text-blue-600 rounded-xl transition-all border border-blue-100/50 dark:border-blue-900/20"
+                                        title="تعديل"
                                       >
-                                        <Pencil size={18} />
+                                        <Pencil size={15} />
                                       </motion.button>
                                       <motion.button 
                                         whileHover={{ scale: 1.1, rotate: -5 }}
-                                        whileTap={{ scale: 0.9 }}
+                                        whileTap={{ scale: 0.95 }}
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           setSelectedRequest(displayReq);
                                         }}
-                                        className="p-1.5 hover:bg-white dark:hover:bg-slate-800 hover:shadow-md rounded-lg text-gray-400 dark:text-slate-500 hover:text-primary transition-all"
+                                        className="p-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700/85 text-slate-600 dark:text-slate-300 rounded-xl transition-all border border-gray-100 dark:border-slate-750"
+                                        title="طباعة"
                                       >
-                                        <Printer size={18} />
+                                        <Printer size={15} />
                                       </motion.button>
                                       <motion.button 
                                         whileHover={{ scale: 1.1, color: "#ef4444" }}
-                                        whileTap={{ scale: 0.9 }}
+                                        whileTap={{ scale: 0.95 }}
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           setConfirmDeleteId(displayReq.id);
                                         }}
-                                        className="p-1.5 hover:bg-white dark:hover:bg-slate-800 hover:shadow-md rounded-lg text-gray-400 dark:text-slate-500 hover:text-red-600 dark:hover:text-red-400 transition-all"
+                                        className="p-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/30 dark:hover:bg-rose-950/50 text-rose-600 rounded-xl transition-all border border-rose-100/50 dark:border-rose-900/20"
+                                        title="حذف"
                                       >
-                                        <Trash2 size={18} />
+                                        <Trash2 size={15} />
                                       </motion.button>
                                     </>
                                   )}
@@ -9454,6 +14440,7 @@ function AppContent() {
                                 whileTap={{ scale: 0.95 }}
                                 onClick={() => {
                                   setSelectedApartment({ building: apt.building, apartment: apt.apartment });
+                                  setIsPrintingStatement(true);
                                 }}
                                 className="px-4 py-2 bg-primary/10 dark:bg-primary/20 text-primary rounded-xl text-xs font-black hover:opacity-80 transition-all flex items-center gap-2"
                               >
@@ -9464,11 +14451,7 @@ function AppContent() {
                                 whileHover={{ scale: 1.05 }}
                                 whileTap={{ scale: 0.95 }}
                                 onClick={() => {
-                                  if (window.confirm(`هل أنت متأكد من حذف جميع طلبات شقة ${apt.apartment} في ${apt.building}؟`)) {
-                                    const aptReqs = requests.filter(r => r.buildingName === apt.building && r.apartmentNumber === apt.apartment);
-                                    aptReqs.forEach(r => deleteRequest(r.id));
-                                    toast.success('تم حذف جميع طلبات الشقة بنجاح');
-                                  }
+                                  setConfirmDeleteAptRequests({ building: apt.building, apartment: apt.apartment });
                                 }}
                                 className="p-2 bg-rose-50 dark:bg-rose-900/20 text-rose-500 rounded-xl hover:opacity-80 transition-all"
                                 title="حذف جميع سجلات الشقة"
@@ -9565,11 +14548,85 @@ function AppContent() {
         )}
 
       {/* Modal */}
+      <GameRoomBookingModal 
+        isOpen={isGameRoomModalOpen}
+        onClose={() => {
+          setIsGameRoomModalOpen(false);
+          setEditingGameRoomBooking(null);
+        }}
+        editingBooking={editingGameRoomBooking}
+        onSave={saveGameRoomBooking}
+      />
+
+      <CarSubscriptionModal 
+        isOpen={isSubscriptionModalOpen}
+        onClose={() => {
+          setIsSubscriptionModalOpen(false);
+          setEditingRequest(null);
+        }}
+        editingRequest={editingRequest}
+        tenants={tenants}
+        apartments={apartments}
+        onSave={async (data) => {
+          const loadingToast = toast.loading(editingRequest ? 'جاري تحديث الاشتراك...' : 'جاري إضافة الاشتراك...');
+          try {
+            if (editingRequest) {
+              await updateDoc(doc(db, 'requests', editingRequest.id), data);
+              toast.success('تم تحديث الاشتراك بنجاح', { id: loadingToast });
+            } else {
+              await addDoc(collection(db, 'requests'), {
+                ...data,
+                userId: user?.uid || 'anonymous',
+                buildingName: 'نظافة سيارات', // Fixed building for car subscriptions
+              });
+              toast.success('تمت إضافة الاشتراك بنجاح', { id: loadingToast });
+            }
+          } catch (error) {
+            console.error(error);
+            toast.error(editingRequest ? 'حدث خطأ أثناء تحديث الاشتراك' : 'حدث خطأ أثناء إضافة الاشتراك', { id: loadingToast });
+          }
+        }}
+      />
+
+      <GroupHistoryModal 
+        isOpen={!!selectedHistoryGroup}
+        onClose={() => setSelectedHistoryGroup(null)}
+        requests={selectedHistoryGroup}
+        onUpdateStatus={updateStatus}
+        onEdit={(req) => {
+          setEditingRequest(req);
+          setIsModalOpen(true);
+          setSelectedHistoryGroup(null);
+        }}
+        onDelete={(id) => {
+          setConfirmDeleteId(id);
+        }}
+      />
+
+      <SubscriptionDetailsModal 
+        isOpen={!!selectedSubscriptionDetail}
+        onClose={() => setSelectedSubscriptionDetail(null)}
+        subscription={selectedSubscriptionDetail}
+      />
+
+      <WhatsAppMessageModal 
+        isOpen={isWhatsAppModalOpen}
+        onClose={() => {
+          setIsWhatsAppModalOpen(false);
+          setSelectedWhatsAppTenant(null);
+        }}
+        tenant={selectedWhatsAppTenant}
+        apartment={apartments.find(a => a.id === selectedWhatsAppTenant?.apartmentId) || null}
+        cleaningRequests={requests}
+      />
+
       <ApartmentDetailsModal 
         isOpen={!!selectedApartment}
         onClose={() => setSelectedApartment(null)}
         apartment={selectedApartment}
         requests={requests}
+        tenants={tenants}
+        apartments={apartments}
         onEdit={(req) => {
           setEditingRequest(req);
           setIsModalOpen(true);
@@ -9588,6 +14645,19 @@ function AppContent() {
         onDelete={(id) => setConfirmDeleteId(id)}
       />
 
+      <ApartmentCodesModal
+        isOpen={isAptCodesModalOpen}
+        onClose={() => setIsAptCodesModalOpen(false)}
+        apartments={apartments}
+        tenants={tenants}
+      />
+
+      <CarSubscriptionPaymentsModal
+        isOpen={!!selectedSubscriptionForPayments}
+        onClose={() => setSelectedSubscriptionForPayments(null)}
+        subscription={selectedSubscriptionForPayments}
+      />
+
       <BookingModal 
         isOpen={isModalOpen} 
         onClose={() => {
@@ -9598,6 +14668,27 @@ function AppContent() {
         defaultBuilding={activeTab !== 'dashboard' && activeTab !== 'تنظيف سيارات' && activeTab !== 'طلبات الماء' && activeTab !== 'طلبات الصيانة' ? activeTab : undefined}
         defaultService={activeTab === 'تنظيف سيارات' ? 'تنظيف سيارات' : activeTab === 'طلبات الماء' ? 'توصيل مياه' : activeTab === 'طلبات الصيانة' ? 'صيانة' : undefined}
         initialData={editingRequest}
+      />
+
+      <MonthlyListModal
+        isOpen={isMonthlyListModalOpen}
+        onClose={() => setIsMonthlyListModalOpen(false)}
+        requests={requests}
+        onGenerate={generateMonthlyList}
+      />
+
+      <ConfirmModal 
+        isOpen={confirmDuplicatePrevMonth}
+        onClose={() => setConfirmDuplicatePrevMonth(false)}
+        onConfirm={() => {
+          setConfirmDuplicatePrevMonth(false);
+          executeDuplicatePreviousMonthSchedule();
+        }}
+        title="نسخ جدول الشهر السابق"
+        message={`هل أنت متأكد من نسخ طلبات الشهر السابق إلى الشهر الحالي (${format(selectedMonth, 'MMMM yyyy', { locale: ar })})؟ سيتم نقل التواريخ ومزامنتها تلقائياً للشهر الجديد.`}
+        confirmText="تأكيد النسخ والمزامنة"
+        variant="primary"
+        icon={Repeat}
       />
 
       {/* Hidden Invoice for Printing */}
@@ -9659,12 +14750,52 @@ function AppContent() {
         )}
       </div>
 
+      {/* Hidden Club Subscription Pledge Form for Printing */}
+      <div style={{ position: 'absolute', top: '-9999px', left: '-9999px', opacity: 0, pointerEvents: 'none' }}>
+        {selectedClubSubForPrint && (
+          <ClubSubscriptionForm
+            ref={clubSubscriptionFormRef}
+            subscription={selectedClubSubForPrint}
+            tenants={tenants}
+          />
+        )}
+      </div>
+
       <ConfirmModal 
         isOpen={!!confirmDeleteId}
         onClose={() => setConfirmDeleteId(null)}
         onConfirm={() => confirmDeleteId && deleteRequest(confirmDeleteId)}
         title="تأكيد الحذف"
         message="هل أنت متأكد من رغبتك في حذف هذا الطلب؟ لا يمكن التراجع عن هذا الإجراء."
+      />
+
+      <ConfirmModal 
+        isOpen={!!confirmDeleteClubSubId}
+        onClose={() => setConfirmDeleteClubSubId(null)}
+        onConfirm={() => {
+          if (confirmDeleteClubSubId) {
+            deleteClubSubscription(confirmDeleteClubSubId);
+            setConfirmDeleteClubSubId(null);
+          }
+        }}
+        title="تأكيد حذف الاشتراك"
+        message="هل أنت متأكد من رغبتك في حذف هذا الاشتراك؟ لا يمكن التراجع عن هذا الإجراء."
+      />
+
+      <ConfirmModal 
+        isOpen={!!confirmDeleteAptRequests}
+        onClose={() => setConfirmDeleteAptRequests(null)}
+        onConfirm={() => {
+          if (confirmDeleteAptRequests) {
+            const { building, apartment } = confirmDeleteAptRequests;
+            const aptReqs = requests.filter(r => r.buildingName === building && r.apartmentNumber === apartment);
+            aptReqs.forEach(r => deleteRequest(r.id));
+            toast.success('تم حذف جميع طلبات الشقة بنجاح');
+            setConfirmDeleteAptRequests(null);
+          }
+        }}
+        title="تأكيد حذف جميع سجلات الشقة"
+        message={confirmDeleteAptRequests ? `هل أنت متأكد من حذف جميع طلبات شقة ${confirmDeleteAptRequests.apartment} في ${confirmDeleteAptRequests.building}؟ لا يمكن التراجع عن هذا الإجراء.` : ''}
       />
 
       <ConfirmModal 
@@ -9705,8 +14836,24 @@ function AppContent() {
         initialBackground={appBackground}
         initialThemeColor={themeColor}
         initialBgOpacity={bgOpacity}
+        initialAdminPhone={adminPhone}
+        initialWhatsappGroupLink={whatsappGroupLink}
         isDarkMode={isDarkMode}
         setIsDarkMode={setIsDarkMode}
+      />
+
+      <ClubSubPrintModal 
+        isOpen={isClubSubPrintModalOpen}
+        onClose={() => setIsClubSubPrintModalOpen(false)}
+        subscriptions={clubSubscriptions}
+        onPrint={(sub) => setSelectedClubSubForPrint(sub)}
+      />
+
+      <WhatsAppAlertsModal 
+        isOpen={isWhatsAppAlertsModalOpen}
+        onClose={() => setIsWhatsAppAlertsModalOpen(false)}
+        subscriptions={clubSubscriptions}
+        tenants={tenants}
       />
 
       <ClubSubscriptionModal 
@@ -9796,12 +14943,27 @@ function AppContent() {
                     <p className="text-gray-500 dark:text-slate-400 font-bold">شقة {selectedHistoryGroup[0].apartmentNumber} - {selectedHistoryGroup[0].buildingName}</p>
                   </div>
                 </div>
-                <button 
-                  onClick={() => setSelectedHistoryGroup(null)}
-                  className="p-3 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-2xl text-gray-400 transition-all"
-                >
-                  <X size={24} />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => {
+                      setSelectedApartment({ 
+                        building: selectedHistoryGroup[0].buildingName, 
+                        apartment: selectedHistoryGroup[0].apartmentNumber 
+                      });
+                      setIsPrintingStatement(true);
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 bg-primary text-white hover:opacity-90 rounded-xl transition-all font-bold text-sm shadow-sm"
+                  >
+                    <Printer size={18} />
+                    <span>طباعة الكشف</span>
+                  </button>
+                  <button 
+                    onClick={() => setSelectedHistoryGroup(null)}
+                    className="p-3 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-2xl text-gray-400 transition-all"
+                  >
+                    <X size={24} />
+                  </button>
+                </div>
               </div>
 
               <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
@@ -9825,21 +14987,29 @@ function AppContent() {
                         </div>
                         <div className="text-center">
                           <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">الحالة</p>
-                          <span className={cn(
-                            "px-2 py-1 rounded-lg text-[10px] font-black",
-                            req.status === 'completed' ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"
-                          )}>
+                          <motion.button 
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={() => updateStatus(req.id, 'status', req.status === 'pending' ? 'completed' : 'pending')}
+                            className={cn(
+                              "px-2 py-1 rounded-lg text-[10px] font-black transition-all cursor-pointer",
+                              req.status === 'completed' ? "bg-green-100 text-green-700 hover:bg-green-200" : "bg-orange-100 text-orange-700 hover:bg-orange-200"
+                            )}>
                             {req.status === 'completed' ? 'مكتمل' : 'قيد التنفيذ'}
-                          </span>
+                          </motion.button>
                         </div>
                         <div className="text-center">
                           <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">الدفع</p>
-                          <span className={cn(
-                            "px-2 py-1 rounded-lg text-[10px] font-black",
-                            req.paymentStatus === 'paid' ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"
-                          )}>
+                          <motion.button 
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={() => updateStatus(req.id, 'paymentStatus', req.paymentStatus === 'paid' ? 'unpaid' : 'paid')}
+                            className={cn(
+                              "px-2 py-1 rounded-lg text-[10px] font-black transition-all cursor-pointer",
+                              req.paymentStatus === 'paid' ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" : "bg-rose-100 text-rose-700 hover:bg-rose-200"
+                            )}>
                             {req.paymentStatus === 'paid' ? 'مدفوع' : 'لم يدفع'}
-                          </span>
+                          </motion.button>
                         </div>
                         <div className="text-center">
                           <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">الكمية</p>
