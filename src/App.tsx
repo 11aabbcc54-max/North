@@ -57,6 +57,7 @@ import {
   ChevronLeft,
   ChevronDown,
   Printer,
+  Receipt as ReceiptIcon,
   X,
   Upload,
   Camera,
@@ -322,20 +323,30 @@ const MAINTENANCE_WORKERS = [
 // --- Helpers ---
 const safeToDate = (timestamp: any): Date => {
   if (!timestamp) return new Date();
-  if (typeof timestamp.toDate === 'function') {
-    try {
-      return timestamp.toDate();
-    } catch (e) {
-      // fallback
+  try {
+    if (typeof timestamp.toDate === 'function') {
+      const d = timestamp.toDate();
+      if (d instanceof Date && !isNaN(d.getTime())) {
+        return d;
+      }
     }
-  }
-  if (typeof timestamp.seconds === 'number') {
-    return new Date(timestamp.seconds * 1000);
-  }
-  if (timestamp instanceof Date) return timestamp;
-  if (typeof timestamp === 'string') {
-    const d = new Date(timestamp);
-    if (!isNaN(d.getTime())) return d;
+    if (typeof timestamp.seconds === 'number' && !isNaN(timestamp.seconds)) {
+      const d = new Date(timestamp.seconds * 1000);
+      if (!isNaN(d.getTime())) {
+        return d;
+      }
+    }
+    if (timestamp instanceof Date) {
+      if (!isNaN(timestamp.getTime())) {
+        return timestamp;
+      }
+    }
+    if (typeof timestamp === 'string' || typeof timestamp === 'number') {
+      const d = new Date(timestamp);
+      if (!isNaN(d.getTime())) return d;
+    }
+  } catch (e) {
+    console.error("Error formatting timestamp in safeToDate:", e);
   }
   return new Date();
 };
@@ -976,6 +987,158 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
   }
 }
 
+const Receipt = React.forwardRef<HTMLDivElement, { request: CleaningRequest | null }>(({ request }, ref) => {
+  if (!request) return null;
+
+  return (
+    <div ref={ref} className="p-8 bg-white text-black font-sans dir-rtl" dir="rtl" style={{ width: '210mm', minHeight: '148mm' }}>
+      <div className="border-4 border-double border-slate-700 p-6 rounded-lg relative">
+        <div className="flex justify-between items-center border-b pb-4 mb-6">
+          <div className="text-right">
+            <h1 className="text-2xl font-black text-slate-800 font-cairo">سند قبض</h1>
+            <p className="text-xs text-gray-500 mt-1">رقم السند: {request.id ? request.id.slice(0, 8).toUpperCase() : '-'}</p>
+          </div>
+          <div className="text-left font-mono text-xs text-gray-500">
+            <p>التاريخ: {request.date ? format(safeToDate(request.date), 'yyyy-MM-dd') : '-'}</p>
+            <p>الوقت: {request.createdAt ? format(safeToDate(request.createdAt), 'HH:mm') : '-'}</p>
+          </div>
+        </div>
+
+        {/* Amount Box */}
+        <div className="flex justify-between items-center bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6">
+          <span className="font-bold font-cairo text-gray-700 text-sm">المبلغ المستلم:</span>
+          <div className="bg-emerald-600 text-white font-mono font-bold text-lg px-4 py-1.5 rounded-lg border-2 border-emerald-700">
+            {request.price || 0} ر.س
+          </div>
+        </div>
+
+        <div className="space-y-4 text-sm leading-8 font-cairo text-gray-800">
+          <div>
+            <span className="text-gray-500 inline-block w-24">استلمنا من:</span>
+            <span className="font-bold border-b border-gray-300 pb-0.5 px-2 inline-block min-w-[200px]">
+              {request.serviceType === 'تنظيف سيارات' ? `مشترك سيارة لوحة ${request.apartmentNumber || ''}` : `ساكن الشقة رقم ${request.apartmentNumber || ''}`}
+            </span>
+          </div>
+
+          <div>
+            <span className="text-gray-500 inline-block w-24">مبلغاً وقدره:</span>
+            <span className="font-bold border-b border-gray-300 pb-0.5 px-2 inline-block min-w-[200px]">
+              {request.price || 0} ريال سعودي لا غير.
+            </span>
+          </div>
+
+          <div>
+            <span className="text-gray-500 inline-block w-24">وذلك لقاء:</span>
+            <span className="font-bold border-b border-gray-300 pb-0.5 px-2 inline-block min-w-[300px]">
+              {request.serviceType || '-'} (مبنى: {request.buildingName || '-'} - شقة/لوحة: {request.apartmentNumber || ''})
+            </span>
+          </div>
+
+          <div>
+            <span className="text-gray-500 inline-block w-24">طريقة الدفع:</span>
+            <span className="font-bold border-b border-gray-300 pb-0.5 px-2 inline-block">
+              {request.paymentMethod === 'cash' ? 'نقداً' : request.paymentMethod === 'bank' ? 'تحويل بنكي' : 'دفع إلكتروني / أخرى'}
+            </span>
+          </div>
+        </div>
+
+        {/* Signatures */}
+        <div className="mt-12 pt-8 border-t border-dashed border-gray-200 grid grid-cols-2 gap-8 text-center text-sm font-cairo">
+          <div>
+            <p className="text-gray-500 mb-8">توقيع المستلم / المحصل</p>
+            <p className="font-bold border-t border-gray-300 pt-2 w-32 mx-auto"></p>
+          </div>
+          <div>
+            <p className="text-gray-500 mb-8">توقيع المستأجر / العميل</p>
+            <p className="font-bold border-t border-gray-300 pt-2 w-32 mx-auto"></p>
+          </div>
+        </div>
+
+        <div className="absolute bottom-4 left-4">
+          <QRCodeSVG value={`${window.location.origin}/receipt/${request.id || ''}`} size={48} />
+        </div>
+      </div>
+    </div>
+  );
+});
+
+const ReceiptClubSub = React.forwardRef<HTMLDivElement, { subscription: ClubSubscription | null }>(({ subscription }, ref) => {
+  if (!subscription) return null;
+
+  const amount = typeof subscription.collectedAmount === 'number' ? subscription.collectedAmount : (subscription.totalPrice || 0);
+
+  return (
+    <div ref={ref} className="p-8 bg-white text-black font-sans dir-rtl" dir="rtl" style={{ width: '210mm', minHeight: '148mm' }}>
+      <div className="border-4 border-double border-slate-700 p-6 rounded-lg relative">
+        <div className="flex justify-between items-center border-b pb-4 mb-6">
+          <div className="text-right">
+            <h1 className="text-2xl font-black text-slate-800 font-cairo">سند قبض</h1>
+            <p className="text-xs text-gray-500 mt-1">رقم السند: {subscription.id ? subscription.id.slice(0, 8).toUpperCase() : '-'}</p>
+          </div>
+          <div className="text-left font-mono text-xs text-gray-500">
+            <p>التاريخ: {subscription.createdAt ? format(safeToDate(subscription.createdAt), 'yyyy-MM-dd') : '-'}</p>
+            <p>الوقت: {subscription.createdAt ? format(safeToDate(subscription.createdAt), 'HH:mm') : '-'}</p>
+          </div>
+        </div>
+
+        {/* Amount Box */}
+        <div className="flex justify-between items-center bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6">
+          <span className="font-bold font-cairo text-gray-700 text-sm">المبلغ المستلم:</span>
+          <div className="bg-emerald-600 text-white font-mono font-bold text-lg px-4 py-1.5 rounded-lg border-2 border-emerald-700">
+            {amount} ر.س
+          </div>
+        </div>
+
+        <div className="space-y-4 text-sm leading-8 font-cairo text-gray-800">
+          <div>
+            <span className="text-gray-500 inline-block w-24">استلمنا من:</span>
+            <span className="font-bold border-b border-gray-300 pb-0.5 px-2 inline-block min-w-[200px]">
+              {subscription.name || '-'}
+            </span>
+          </div>
+
+          <div>
+            <span className="text-gray-500 inline-block w-24">مبلغاً وقدره:</span>
+            <span className="font-bold border-b border-gray-300 pb-0.5 px-2 inline-block min-w-[200px]">
+              {amount} ريال سعودي لا غير.
+            </span>
+          </div>
+
+          <div>
+            <span className="text-gray-500 inline-block w-24">وذلك لقاء:</span>
+            <span className="font-bold border-b border-gray-300 pb-0.5 px-2 inline-block min-w-[300px]">
+              اشتراك نادي (مقر العمل: {subscription.workplace || '-'} - المدة: {subscription.monthsCount || 0} شهر)
+            </span>
+          </div>
+
+          <div>
+            <span className="text-gray-500 inline-block w-24">حالة الدفع:</span>
+            <span className="font-bold border-b border-gray-300 pb-0.5 px-2 inline-block">
+              {subscription.paymentStatus === 'paid' ? 'مدفوع بالكامل' : 'معلق / دفع جزئي'}
+            </span>
+          </div>
+        </div>
+
+        {/* Signatures */}
+        <div className="mt-12 pt-8 border-t border-dashed border-gray-200 grid grid-cols-2 gap-8 text-center text-sm font-cairo">
+          <div>
+            <p className="text-gray-500 mb-8">توقيع المستلم / المحصل</p>
+            <p className="font-bold border-t border-gray-300 pt-2 w-32 mx-auto"></p>
+          </div>
+          <div>
+            <p className="text-gray-500 mb-8">توقيع المشترك</p>
+            <p className="font-bold border-t border-gray-300 pt-2 w-32 mx-auto"></p>
+          </div>
+        </div>
+
+        <div className="absolute bottom-4 left-4">
+          <QRCodeSVG value={`${window.location.origin}/club-sub-receipt/${subscription.id || ''}`} size={48} />
+        </div>
+      </div>
+    </div>
+  );
+});
+
 const Invoice = React.forwardRef<HTMLDivElement, { request: CleaningRequest }>(({ request }, ref) => {
   return (
     <div ref={ref} className="p-8 bg-white text-black font-sans dir-rtl" dir="rtl">
@@ -1357,12 +1520,13 @@ const StaffReport = React.forwardRef<HTMLDivElement, { requests: CleaningRequest
   );
 });
 
-const ClubSubscriptionForm = React.forwardRef<HTMLDivElement, { subscription: ClubSubscription, tenants: Tenant[] }>(({ subscription, tenants }, ref) => {
-  const matchingTenant = tenants.find(t => 
+const ClubSubscriptionForm = React.forwardRef<HTMLDivElement, { subscription: ClubSubscription | null, tenants: Tenant[] }>(({ subscription, tenants }, ref) => {
+  if (!subscription) return null;
+
+  const matchingTenant = tenants ? tenants.find(t => 
     t.name === subscription.name || 
-    t.name.includes(subscription.name) || 
-    subscription.name.includes(t.name)
-  );
+    (t.name && subscription.name && (t.name.includes(subscription.name) || subscription.name.includes(t.name)))
+  ) : null;
   const phone = matchingTenant?.phone || '';
 
   return (
@@ -1587,15 +1751,33 @@ const CarSubscriptionModal = ({
   onSave,
   editingRequest,
   tenants = [],
-  apartments = []
+  apartments = [],
+  selectedMonth
 }: { 
   isOpen: boolean, 
   onClose: () => void, 
   onSave: (data: any) => void,
   editingRequest?: CleaningRequest | null,
   tenants?: Tenant[],
-  apartments?: Apartment[]
+  apartments?: Apartment[],
+  selectedMonth?: Date
 }) => {
+  const getDefaultDate = () => {
+    const today = new Date();
+    if (selectedMonth) {
+      const isCurrentMonth = today.getFullYear() === selectedMonth.getFullYear() && today.getMonth() === selectedMonth.getMonth();
+      if (!isCurrentMonth) {
+        const d = new Date(selectedMonth);
+        const maxDays = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+        const targetDay = Math.min(today.getDate(), maxDays);
+        d.setDate(targetDay);
+        d.setHours(today.getHours(), today.getMinutes(), 0, 0);
+        return d;
+      }
+    }
+    return today;
+  };
+
   const [formData, setFormData] = useState({
     apartmentNumber: '', 
     apartment: '',
@@ -1624,13 +1806,14 @@ const CarSubscriptionModal = ({
         workerName: editingRequest.workerName || ''
       });
     } else if (isOpen) {
-      // Reset for new entry
+      // Reset for new entry using helper
+      const defaultDate = getDefaultDate();
       setFormData({
         apartmentNumber: '',
         apartment: '',
         car: '',
         price: 300,
-        startDate: format(new Date(), 'yyyy-MM-dd'),
+        startDate: format(defaultDate, 'yyyy-MM-dd'),
         durationMonths: 1,
         frequency: 'daily',
         selectedDays: [0, 1, 2, 3, 4, 5, 6],
@@ -1638,7 +1821,7 @@ const CarSubscriptionModal = ({
         workerName: ''
       });
     }
-  }, [editingRequest, isOpen]);
+  }, [editingRequest, isOpen, selectedMonth]);
 
   if (!isOpen) return null;
 
@@ -2053,13 +2236,31 @@ const GameRoomBookingModal = ({
   isOpen, 
   onClose, 
   onSave,
-  editingBooking
+  editingBooking,
+  selectedMonth
 }: { 
   isOpen: boolean, 
   onClose: () => void, 
   onSave: (data: any) => void,
-  editingBooking?: Booking | null
+  editingBooking?: Booking | null,
+  selectedMonth?: Date
 }) => {
+  const getDefaultDate = () => {
+    const today = new Date();
+    if (selectedMonth) {
+      const isCurrentMonth = today.getFullYear() === selectedMonth.getFullYear() && today.getMonth() === selectedMonth.getMonth();
+      if (!isCurrentMonth) {
+        const d = new Date(selectedMonth);
+        const maxDays = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+        const targetDay = Math.min(today.getDate(), maxDays);
+        d.setDate(targetDay);
+        d.setHours(today.getHours(), today.getMinutes(), 0, 0);
+        return d;
+      }
+    }
+    return today;
+  };
+
   const [formData, setFormData] = useState({
     customerName: '',
     customerPhone: '',
@@ -2085,11 +2286,11 @@ const GameRoomBookingModal = ({
         customerPhone: '',
         buildingName: '',
         apartmentNumber: '',
-        date: format(new Date(), 'yyyy-MM-dd'),
+        date: format(getDefaultDate(), 'yyyy-MM-dd'),
         time: '10:00'
       });
     }
-  }, [editingBooking, isOpen]);
+  }, [editingBooking, isOpen, selectedMonth]);
 
   if (!isOpen) return null;
 
@@ -2727,11 +2928,13 @@ const ApartmentCodesModal = ({
 const CarSubscriptionPaymentsModal = ({
   isOpen,
   onClose,
-  subscription
+  subscription,
+  onPrintReceipt
 }: {
   isOpen: boolean;
   onClose: () => void;
   subscription: CleaningRequest | null;
+  onPrintReceipt: (req: CleaningRequest) => void;
 }) => {
   const [payments, setPayments] = useState<{
     monthKey: string;
@@ -2989,6 +3192,26 @@ const CarSubscriptionPaymentsModal = ({
                         onChange={e => handleDateChange(idx, e.target.value)}
                         className="px-2 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-xl text-[10px] font-bold focus:outline-none focus:ring-1 focus:ring-primary h-[32px] sm:w-28 text-center"
                       />
+                    )}
+
+                    {p.isPaid && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const tempReq: CleaningRequest = {
+                            ...subscription,
+                            id: `${subscription.id}-${p.monthKey}`,
+                            price: p.amount,
+                            date: p.paidDate ? Timestamp.fromDate(new Date(p.paidDate)) : subscription.date,
+                            serviceType: `${subscription.serviceType} (اشتراك شهر ${p.monthName})`,
+                          };
+                          onPrintReceipt(tempReq);
+                        }}
+                        className="p-2 text-emerald-600 hover:bg-emerald-500/10 dark:hover:bg-emerald-500/20 rounded-xl transition-all cursor-pointer flex items-center justify-center border border-transparent hover:border-emerald-500/10"
+                        title="طباعة سند القبض"
+                      >
+                        <ReceiptIcon size={15} />
+                      </button>
                     )}
 
                     <button
@@ -3604,15 +3827,33 @@ const BookingModal = ({
   onSave, 
   defaultBuilding, 
   defaultService,
-  initialData 
+  initialData,
+  selectedMonth
 }: { 
   isOpen: boolean, 
   onClose: () => void, 
   onSave: (data: any) => void, 
   defaultBuilding?: string, 
   defaultService?: string,
-  initialData?: CleaningRequest | null
+  initialData?: CleaningRequest | null,
+  selectedMonth?: Date
 }) => {
+  const getDefaultDate = () => {
+    const today = new Date();
+    if (selectedMonth) {
+      const isCurrentMonth = today.getFullYear() === selectedMonth.getFullYear() && today.getMonth() === selectedMonth.getMonth();
+      if (!isCurrentMonth) {
+        const d = new Date(selectedMonth);
+        const maxDays = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+        const targetDay = Math.min(today.getDate(), maxDays);
+        d.setDate(targetDay);
+        d.setHours(today.getHours(), today.getMinutes(), 0, 0);
+        return d;
+      }
+    }
+    return today;
+  };
+
   const [formData, setFormData] = useState({
     buildingName: defaultBuilding || BUILDINGS[0] || '',
     apartmentNumber: '',
@@ -3656,6 +3897,7 @@ const BookingModal = ({
         const service = defaultService || SERVICES[0].name;
         const serviceData = SERVICES.find(s => s.name === service);
         const uPrice = serviceData?.price || 100;
+        const defaultDate = getDefaultDate();
         setFormData({
           buildingName: defaultBuilding || BUILDINGS[0] || '',
           apartmentNumber: '',
@@ -3664,18 +3906,18 @@ const BookingModal = ({
           unitPrice: uPrice,
           price: uPrice,
           workerName: '',
-          dates: [format(new Date(), "yyyy-MM-dd'T'HH:mm")],
+          dates: [format(defaultDate, "yyyy-MM-dd'T'HH:mm")],
           notes: '',
           waterGallons: 1,
           isRecurring: false,
           selectedMonths: [],
-          recurrenceDay: new Date().getDate(),
+          recurrenceDay: defaultDate.getDate(),
           status: 'pending',
-          createdAt: format(new Date(), "yyyy-MM-dd'T'HH:mm")
+          createdAt: format(defaultDate, "yyyy-MM-dd'T'HH:mm")
         });
       }
     }
-  }, [isOpen, defaultBuilding, defaultService, initialData]);
+  }, [isOpen, defaultBuilding, defaultService, initialData, selectedMonth]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -3740,422 +3982,520 @@ const BookingModal = ({
   const currentServices = isMaintenance ? MAINTENANCE_SERVICES : SERVICES;
 
   return (
-    <div className="fixed inset-0 bg-slate-900/40 flex items-start justify-end z-[70] p-4 backdrop-blur-sm" dir="rtl" onClick={onClose}>
+    <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[70] p-4 backdrop-blur-sm" dir="rtl" onClick={onClose}>
       <motion.div 
-        initial={{ x: '100%', opacity: 0 }}
-        animate={{ x: 0, opacity: 1 }}
-        exit={{ x: '100%', opacity: 0 }}
-        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+        initial={{ scale: 0.95, opacity: 0, y: 15 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.95, opacity: 0, y: 15 }}
+        transition={{ type: 'spring', damping: 28, stiffness: 200 }}
         onClick={e => e.stopPropagation()}
-        className="bg-white dark:bg-slate-900 rounded-[2rem] w-full max-w-[90vw] md:w-[448px] h-full max-h-[90vh] overflow-auto shadow-2xl border border-gray-100 dark:border-slate-800 relative"
+        className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-[95vw] md:max-w-4xl h-[90vh] md:h-[85vh] max-h-[800px] flex flex-col shadow-2xl border border-gray-100 dark:border-slate-800 relative overflow-hidden"
       >
-        <div className="absolute bottom-1 right-1 pointer-events-none opacity-20">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400">
-            <line x1="22" y1="2" x2="2" y2="22" />
-            <line x1="22" y1="12" x2="12" y2="22" />
-          </svg>
-        </div>
-        <div className="p-6 border-b dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50">
-          <div>
-            <h3 className="text-xl font-black text-gray-900 dark:text-white">
-              {initialData ? 'تعديل طلب خدمة' : 'إضافة طلب جديد'}
-            </h3>
-            <p className="text-xs text-gray-500 dark:text-slate-400 font-bold">يرجى تعبئة بيانات الخدمة بدقة</p>
-          </div>
-          <motion.button 
-            whileHover={{ scale: 1.1, rotate: 90 }}
-            whileTap={{ scale: 0.9 }}
-            onClick={onClose}
-            className="p-2 hover:bg-white dark:hover:bg-slate-700 rounded-xl text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300 transition-all shadow-sm"
-          >
-            <X size={20} />
-          </motion.button>
-        </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-4" dir="rtl">
-          <div className="bg-primary/5 dark:bg-primary/20 p-4 rounded-2xl border border-primary/10 dark:border-primary/30 space-y-3 mb-4">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black text-primary uppercase tracking-widest px-1">وقت إنشاء الطلب</span>
-              <div className="flex items-center gap-2 text-[10px] font-bold text-primary/80">
-                <Clock size={12} />
-                <span>يمكنك تعديل وقت الطلب الأصلي هنا</span>
+        <form onSubmit={handleSubmit} className="h-full flex flex-col" dir="rtl">
+          {/* Header */}
+          <div className="p-6 border-b border-gray-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/30 dark:bg-slate-800/30 z-10">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-primary/10 rounded-2xl flex items-center justify-center text-primary">
+                <Sparkles size={22} className="animate-pulse" />
+              </div>
+              <div>
+                <h3 className="text-xl font-black text-gray-900 dark:text-white font-cairo">
+                  {initialData ? 'تعديل طلب خدمة' : 'إضافة طلب جديد'}
+                </h3>
+                <p className="text-xs text-gray-400 dark:text-slate-400 font-bold mt-0.5 font-sans">يرجى تعبئة بيانات الخدمة بدقة</p>
               </div>
             </div>
-            <input 
-              type="datetime-local"
-              required
-              className="w-full p-3 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary text-sm text-gray-900 dark:text-white font-bold transition-all"
-              value={formData.createdAt}
-              onChange={e => setFormData({...formData, createdAt: e.target.value})}
-            />
+            <motion.button 
+              whileHover={{ scale: 1.1, rotate: 90 }}
+              whileTap={{ scale: 0.9 }}
+              type="button"
+              onClick={onClose}
+              className="w-10 h-10 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-400 hover:text-gray-600 dark:text-slate-500 dark:hover:text-slate-300 transition-all flex items-center justify-center cursor-pointer border border-transparent hover:border-gray-200/50 dark:hover:border-slate-700/50"
+            >
+              <X size={18} />
+            </motion.button>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1">المبنى</label>
-              <select 
-                className="w-full p-3 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary text-sm text-gray-900 dark:text-white font-bold transition-all appearance-none"
-                value={formData.buildingName}
-                onChange={e => setFormData({...formData, buildingName: e.target.value})}
-              >
-                {BUILDINGS.map(b => <option key={b} value={b}>{b}</option>)}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1">
-                {formData.serviceType === 'تنظيف سيارات' ? 'رقم اللوحة' : 'رقم الشقة'}
-              </label>
-              <input 
-                required
-                className="w-full p-3 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary text-sm text-gray-900 dark:text-white font-bold transition-all"
-                value={formData.apartmentNumber}
-                onChange={e => setFormData({...formData, apartmentNumber: e.target.value})}
-                placeholder={formData.serviceType === 'تنظيف سيارات' ? 'أ ب ج 1234' : 'مثال: 101'}
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1">نوع الخدمة</label>
-              <select 
-                className="w-full p-3 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary text-sm text-gray-900 dark:text-white font-bold transition-all appearance-none"
-                value={formData.serviceType}
-                onChange={e => {
-                  const service = currentServices.find(s => s.name === e.target.value);
-                  const uPrice = service?.price || 100;
-                  const datesCount = formData.dates.length || 1;
-                  const recurringCount = formData.isRecurring ? (formData.selectedMonths.length + 1) : 1;
-                  const gallons = e.target.value === 'توصيل مياه' ? formData.waterGallons : 1;
-                  const factor = e.target.value === 'توصيل مياه' ? (gallons * datesCount) : (datesCount > 1 ? datesCount : formData.monthsCount);
-                  setFormData({
-                    ...formData, 
-                    serviceType: e.target.value, 
-                    unitPrice: uPrice,
-                    price: uPrice * factor * recurringCount
-                  });
-                }}
-              >
-                {currentServices.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1">المبلغ (ريال)</label>
-              <input 
-                type="number"
-                required
-                className="w-full p-3 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary text-sm text-gray-900 dark:text-white font-bold transition-all"
-                value={formData.unitPrice}
-                onChange={e => {
-                  const uPrice = Number(e.target.value);
-                  const datesCount = formData.dates.length || 1;
-                  const recurringCount = formData.isRecurring ? (formData.selectedMonths.length + 1) : 1;
-                  const gallons = formData.serviceType === 'توصيل مياه' ? formData.waterGallons : 1;
-                  const factor = formData.serviceType === 'توصيل مياه' ? (gallons * datesCount) : (datesCount > 1 ? datesCount : formData.monthsCount);
-                  setFormData({
-                    ...formData, 
-                    unitPrice: uPrice, 
-                    price: uPrice * factor * recurringCount
-                  });
-                }}
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            {isMaintenance ? (
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1">العامل المسؤول</label>
-                <select 
-                  className="w-full p-3 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary text-sm text-gray-900 dark:text-white font-bold transition-all appearance-none"
-                  value={formData.workerName}
-                  onChange={e => setFormData({...formData, workerName: e.target.value})}
-                >
-                  <option value="">اختر العامل...</option>
-                  {MAINTENANCE_WORKERS.map(w => <option key={w} value={w}>{w}</option>)}
-                </select>
-              </div>
-            ) : formData.serviceType === 'توصيل مياه' ? (
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1">كم جالون</label>
-                <input 
-                  type="number"
-                  min="1"
-                  required
-                  className="w-full p-3 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary text-sm text-gray-900 dark:text-white font-bold transition-all"
-                  value={formData.waterGallons}
-                  onChange={e => {
-                    const gallons = Number(e.target.value);
-                    const service = SERVICES.find(s => s.name === formData.serviceType);
-                    const uPrice = service?.price || 10;
-                    const datesCount = formData.dates.length || 1;
-                    const recurringCount = formData.isRecurring ? (formData.selectedMonths.length + 1) : 1;
-                    setFormData({
-                      ...formData, 
-                      waterGallons: gallons, 
-                      unitPrice: uPrice,
-                      price: uPrice * gallons * datesCount * recurringCount
-                    });
-                  }}
-                />
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1">عدد الطلبات</label>
-                <input 
-                  type="number"
-                  min="1"
-                  required
-                  className="w-full p-3 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary text-sm text-gray-900 dark:text-white font-bold transition-all"
-                  value={formData.monthsCount}
-                  onChange={e => {
-                    const months = Number(e.target.value);
-                    const datesCount = formData.dates.length || 1;
-                    const recurringCount = formData.isRecurring ? (formData.selectedMonths.length + 1) : 1;
-                    const factor = datesCount > 1 ? datesCount : months;
-                    setFormData({
-                      ...formData, 
-                      monthsCount: months, 
-                      price: formData.unitPrice * factor * recurringCount
-                    });
-                  }}
-                />
-              </div>
-            )}
-          </div>
-          <div className="space-y-3">
-            <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1">التواريخ والمواعيد</label>
-            <div className="space-y-2">
-              {formData.dates.map((d, idx) => (
-                <div key={idx} className="flex gap-2">
-                  <input 
-                    type="datetime-local"
-                    required
-                    className="flex-1 p-3 bg-gray-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 focus:ring-primary text-sm text-gray-900 dark:text-white font-bold transition-all"
-                    value={d}
-                    onChange={e => {
-                      const newDates = [...formData.dates];
-                      newDates[idx] = e.target.value;
-                      if (idx === 0) {
-                        setFormData({...formData, dates: newDates, createdAt: e.target.value});
-                      } else {
-                        setFormData({...formData, dates: newDates});
-                      }
-                    }}
-                  />
-                  {formData.dates.length > 1 && (
-                  <motion.button 
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
-                    type="button"
-                    onClick={() => {
-                      const newDates = formData.dates.filter((_, i) => i !== idx);
-                      const datesCount = newDates.length || 1;
-                      const recurringCount = formData.isRecurring ? (formData.selectedMonths.length + 1) : 1;
-                      const gallons = formData.serviceType === 'توصيل مياه' ? (formData.waterGallons || 1) : 1;
-                      const factor = formData.serviceType === 'توصيل مياه' ? (gallons * datesCount) : (datesCount > 1 ? datesCount : formData.monthsCount);
-                      const newTotal = formData.unitPrice * factor * recurringCount;
-                      setFormData({...formData, dates: newDates, price: newTotal});
-                    }}
-                    className="p-3 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 rounded-xl hover:bg-rose-100 transition-all"
-                  >
-                    <X size={18} />
-                  </motion.button>
+
+          {/* Scrollable Form Body */}
+          <div className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-800">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+              {/* Right Column: Basic Service Configuration */}
+              <div className="space-y-6">
+                {/* Creation Time Alert Box */}
+                <div className="bg-amber-500/5 dark:bg-amber-500/10 p-4 rounded-2xl border border-amber-500/10 dark:border-amber-500/20 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-widest font-sans">وقت إنشاء الطلب</span>
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-amber-600/80 dark:text-amber-400/80">
+                      <Clock size={12} />
+                      <span>يمكنك تعديل وقت الطلب الأصلي هنا</span>
+                    </div>
+                  </div>
+                  <div className="relative">
+                    <input 
+                      type="datetime-local"
+                      required
+                      className="w-full pl-4 pr-10 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm text-gray-900 dark:text-white font-black transition-all shadow-sm outline-none font-sans"
+                      value={formData.createdAt}
+                      onChange={e => setFormData({...formData, createdAt: e.target.value})}
+                    />
+                    <Calendar size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  </div>
+                </div>
+
+                {/* Building & Apartment No Grid */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1 font-sans">المبنى</label>
+                    <div className="relative">
+                      <select 
+                        className="w-full pl-10 pr-10 py-3 bg-slate-50 hover:bg-slate-100/70 focus:bg-white dark:bg-slate-800/50 dark:hover:bg-slate-800 focus:dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm text-gray-900 dark:text-white font-black transition-all appearance-none cursor-pointer shadow-sm outline-none font-sans"
+                        value={formData.buildingName}
+                        onChange={e => setFormData({...formData, buildingName: e.target.value})}
+                      >
+                        {BUILDINGS.map(b => <option key={b} value={b}>{b}</option>)}
+                      </select>
+                      <Building2 size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      <ChevronDown size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1 font-sans">
+                      {formData.serviceType === 'تنظيف سيارات' ? 'رقم اللوحة' : 'رقم الشقة'}
+                    </label>
+                    <div className="relative">
+                      <input 
+                        required
+                        className="w-full pl-4 pr-10 py-3 bg-slate-50 hover:bg-slate-100/70 focus:bg-white dark:bg-slate-800/50 dark:hover:bg-slate-800 focus:dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm text-gray-900 dark:text-white font-black transition-all shadow-sm outline-none font-sans"
+                        value={formData.apartmentNumber}
+                        onChange={e => setFormData({...formData, apartmentNumber: e.target.value})}
+                        placeholder={formData.serviceType === 'تنظيف سيارات' ? 'أ ب ج 1234' : 'مثال: 101'}
+                      />
+                      {formData.serviceType === 'تنظيف سيارات' ? (
+                        <Car size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      ) : (
+                        <HomeIcon size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Service & Price Grid */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1 font-sans">نوع الخدمة</label>
+                    <div className="relative">
+                      <select 
+                        className="w-full pl-10 pr-10 py-3 bg-slate-50 hover:bg-slate-100/70 focus:bg-white dark:bg-slate-800/50 dark:hover:bg-slate-800 focus:dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm text-gray-900 dark:text-white font-black transition-all appearance-none cursor-pointer shadow-sm outline-none font-sans"
+                        value={formData.serviceType}
+                        onChange={e => {
+                          const service = currentServices.find(s => s.name === e.target.value);
+                          const uPrice = service?.price || 100;
+                          const datesCount = formData.dates.length || 1;
+                          const recurringCount = formData.isRecurring ? (formData.selectedMonths.length + 1) : 1;
+                          const gallons = e.target.value === 'توصيل مياه' ? formData.waterGallons : 1;
+                          const factor = e.target.value === 'توصيل مياه' ? (gallons * datesCount) : (datesCount > 1 ? datesCount : formData.monthsCount);
+                          setFormData({
+                            ...formData, 
+                            serviceType: e.target.value, 
+                            unitPrice: uPrice,
+                            price: uPrice * factor * recurringCount
+                          });
+                        }}
+                      >
+                        {currentServices.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
+                      </select>
+                      <Wrench size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      <ChevronDown size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1 font-sans">المبلغ (ريال)</label>
+                    <div className="relative">
+                      <input 
+                        type="number"
+                        required
+                        className="w-full pl-4 pr-10 py-3 bg-slate-50 hover:bg-slate-100/70 focus:bg-white dark:bg-slate-800/50 dark:hover:bg-slate-800 focus:dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm text-gray-900 dark:text-white font-black transition-all shadow-sm outline-none font-mono"
+                        value={formData.unitPrice}
+                        onChange={e => {
+                          const uPrice = Number(e.target.value);
+                          const datesCount = formData.dates.length || 1;
+                          const recurringCount = formData.isRecurring ? (formData.selectedMonths.length + 1) : 1;
+                          const gallons = formData.serviceType === 'توصيل مياه' ? formData.waterGallons : 1;
+                          const factor = formData.serviceType === 'توصيل مياه' ? (gallons * datesCount) : (datesCount > 1 ? datesCount : formData.monthsCount);
+                          setFormData({
+                            ...formData, 
+                            unitPrice: uPrice, 
+                            price: uPrice * factor * recurringCount
+                          });
+                        }}
+                      />
+                      <DollarSign size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Dynamic Extra Field */}
+                <div className="animate-in fade-in duration-250">
+                  {isMaintenance ? (
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1 font-sans">العامل المسؤول</label>
+                      <div className="relative">
+                        <select 
+                          className="w-full pl-10 pr-10 py-3 bg-slate-50 hover:bg-slate-100/70 focus:bg-white dark:bg-slate-800/50 dark:hover:bg-slate-800 focus:dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm text-gray-900 dark:text-white font-black transition-all appearance-none cursor-pointer shadow-sm outline-none font-sans"
+                          value={formData.workerName}
+                          onChange={e => setFormData({...formData, workerName: e.target.value})}
+                        >
+                          <option value="">اختر العامل...</option>
+                          {MAINTENANCE_WORKERS.map(w => <option key={w} value={w}>{w}</option>)}
+                        </select>
+                        <UserIcon size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                        <ChevronDown size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      </div>
+                    </div>
+                  ) : formData.serviceType === 'توصيل مياه' ? (
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1 font-sans">كم جالون</label>
+                      <div className="relative">
+                        <input 
+                          type="number"
+                          min="1"
+                          required
+                          className="w-full pl-4 pr-10 py-3 bg-slate-50 hover:bg-slate-100/70 focus:bg-white dark:bg-slate-800/50 dark:hover:bg-slate-800 focus:dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm text-gray-900 dark:text-white font-black transition-all shadow-sm outline-none font-mono"
+                          value={formData.waterGallons}
+                          onChange={e => {
+                            const gallons = Number(e.target.value);
+                            const service = SERVICES.find(s => s.name === formData.serviceType);
+                            const uPrice = service?.price || 10;
+                            const datesCount = formData.dates.length || 1;
+                            const recurringCount = formData.isRecurring ? (formData.selectedMonths.length + 1) : 1;
+                            setFormData({
+                              ...formData, 
+                              waterGallons: gallons, 
+                              unitPrice: uPrice,
+                              price: uPrice * gallons * datesCount * recurringCount
+                            });
+                          }}
+                        />
+                        <Droplets size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1 font-sans">عدد الطلبات</label>
+                      <div className="relative">
+                        <input 
+                          type="number"
+                          min="1"
+                          required
+                          className="w-full pl-4 pr-10 py-3 bg-slate-50 hover:bg-slate-100/70 focus:bg-white dark:bg-slate-800/50 dark:hover:bg-slate-800 focus:dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm text-gray-900 dark:text-white font-black transition-all shadow-sm outline-none font-mono"
+                          value={formData.monthsCount}
+                          onChange={e => {
+                            const months = Number(e.target.value);
+                            const datesCount = formData.dates.length || 1;
+                            const recurringCount = formData.isRecurring ? (formData.selectedMonths.length + 1) : 1;
+                            const factor = datesCount > 1 ? datesCount : months;
+                            setFormData({
+                              ...formData, 
+                              monthsCount: months, 
+                              price: formData.unitPrice * factor * recurringCount
+                            });
+                          }}
+                        />
+                        <Plus size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      </div>
+                    </div>
                   )}
                 </div>
-              ))}
-              {!initialData && (
-                <motion.button 
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  type="button"
-                  onClick={() => {
-                    const newDates = [...formData.dates, format(new Date(), "yyyy-MM-dd'T'HH:mm")];
-                    const datesCount = newDates.length;
-                    const recurringCount = formData.isRecurring ? (formData.selectedMonths.length + 1) : 1;
-                    const gallons = formData.serviceType === 'توصيل مياه' ? (formData.waterGallons || 1) : 1;
-                    const factor = formData.serviceType === 'توصيل مياه' ? (gallons * datesCount) : (datesCount > 1 ? datesCount : formData.monthsCount);
-                    const newTotal = formData.unitPrice * factor * recurringCount;
-                    setFormData({...formData, dates: newDates, price: newTotal});
-                  }}
-                  className="w-full py-2.5 border-2 border-dashed border-gray-200 dark:border-slate-700 rounded-xl text-gray-400 hover:text-primary hover:border-primary/30 transition-all flex items-center justify-center gap-2 font-bold text-xs"
-                >
-                  <Plus size={16} />
-                  إضافة تاريخ آخر
-                </motion.button>
-              )}
-            </div>
-          </div>
-          <div className="grid grid-cols-1 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1">السعر الإجمالي (ريال)</label>
-              <input 
-                type="number"
-                required
-                className="w-full p-3 bg-gray-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 focus:ring-primary text-gray-900 dark:text-white font-black text-lg transition-all"
-                value={formData.price}
-                onChange={e => {
-                  const totalPrice = Number(e.target.value);
-                  const datesCount = formData.dates.length || 1;
-                  const recurringCount = formData.isRecurring ? (formData.selectedMonths.length + 1) : 1;
-                  const gallons = formData.serviceType === 'توصيل مياه' ? (formData.waterGallons || 1) : 1;
-                  const factor = formData.serviceType === 'توصيل مياه' ? (gallons * datesCount) : (datesCount > 1 ? datesCount : formData.monthsCount);
-                  const denominator = factor * recurringCount;
-                  setFormData({
-                    ...formData, 
-                    price: totalPrice,
-                    unitPrice: denominator > 0 ? (totalPrice / denominator) : totalPrice
-                  });
-                }}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1">حالة التنفيذ</label>
-              <div className="flex bg-gray-50 dark:bg-slate-800 p-1 rounded-xl">
-                <button 
-                  type="button"
-                  onClick={() => setFormData({...formData, status: 'pending'})}
-                  className={cn(
-                    "flex-1 py-2 rounded-lg text-xs font-bold transition-all",
-                    formData.status === 'pending' ? "bg-white dark:bg-slate-700 text-amber-600 dark:text-amber-400 shadow-sm" : "text-gray-500 dark:text-slate-400"
-                  )}
-                >
-                  لم يتم التنفيذ
-                </button>
-                <button 
-                  type="button"
-                  onClick={() => setFormData({...formData, status: 'completed'})}
-                  className={cn(
-                    "flex-1 py-2 rounded-lg text-xs font-bold transition-all",
-                    formData.status === 'completed' ? "bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-sm" : "text-gray-500 dark:text-slate-400"
-                  )}
-                >
-                  تم التنفيذ
-                </button>
-              </div>
-            </div>
-          </div>
 
-          <div className="flex items-center gap-2 p-3 bg-primary/5 dark:bg-primary/20 rounded-xl">
-            <input 
-              type="checkbox"
-              id="isRecurring"
-              className="w-4 h-4 text-primary rounded focus:ring-primary"
-              checked={formData.isRecurring}
-              onChange={e => {
-                const checked = e.target.checked;
-                const datesCount = formData.dates.length || 1;
-                const recurringCount = checked ? (formData.selectedMonths.length + 1) : 1;
-                const gallons = formData.serviceType === 'توصيل مياه' ? (formData.waterGallons || 1) : 1;
-                const factor = formData.serviceType === 'توصيل مياه' ? (gallons * datesCount) : (datesCount > 1 ? datesCount : formData.monthsCount);
-                const newTotal = formData.unitPrice * factor * recurringCount;
-                setFormData({...formData, isRecurring: checked, price: newTotal});
-              }}
-            />
-            <label htmlFor="isRecurring" className="text-sm font-bold text-primary dark:text-white flex items-center gap-2">
-              <Repeat size={16} />
-              تكرار الطلب في أشهر محددة
-            </label>
-          </div>
-
-          {formData.isRecurring && (
-            <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1">كرر لي اليوم بالشهر</label>
-                <div className="flex items-center gap-2">
-                  <input 
-                    type="number"
-                    min="1"
-                    max="31"
-                    className="w-20 p-3 bg-gray-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 focus:ring-primary text-sm text-gray-900 dark:text-white font-bold transition-all"
-                    value={formData.recurrenceDay}
-                    onChange={e => setFormData({...formData, recurrenceDay: Number(e.target.value)})}
-                  />
-                  <span className="text-xs text-gray-500 dark:text-slate-400 font-bold">من كل شهر مختار</span>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between px-1">
-                  <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest">اختر الأشهر للتكرار</label>
-                  <div className="flex items-center gap-3">
+                {/* Execution Status Switcher */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1 font-sans">حالة التنفيذ</label>
+                  <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200/20">
                     <button 
                       type="button"
-                      onClick={() => {
-                        const baseDate = formData.dates[0] ? new Date(formData.dates[0]) : new Date();
-                        const nextMonth = (baseDate.getMonth() + 1) % 12;
-                        if (!formData.selectedMonths.includes(nextMonth)) {
-                          setFormData({...formData, selectedMonths: [...formData.selectedMonths, nextMonth]});
-                        }
-                      }}
-                      className="text-[10px] font-black text-primary hover:text-primary/80 dark:text-primary flex items-center gap-1"
+                      onClick={() => setFormData({...formData, status: 'pending'})}
+                      className={cn(
+                        "flex-1 py-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer font-sans",
+                        formData.status === 'pending' 
+                          ? "bg-white dark:bg-slate-700 text-amber-600 dark:text-amber-400 shadow-md shadow-amber-500/5" 
+                          : "text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-300"
+                      )}
                     >
-                      <Plus size={12} />
-                      تكرار للشهر القادم
+                      <span className="w-2 h-2 rounded-full bg-amber-500" />
+                      لم يتم التنفيذ
                     </button>
                     <button 
                       type="button"
-                      onClick={() => setFormData({...formData, selectedMonths: []})}
-                      className="text-[10px] font-black text-gray-400 hover:text-gray-600 dark:text-slate-500"
+                      onClick={() => setFormData({...formData, status: 'completed'})}
+                      className={cn(
+                        "flex-1 py-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer font-sans",
+                        formData.status === 'completed' 
+                          ? "bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-md shadow-emerald-500/5" 
+                          : "text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-300"
+                      )}
                     >
-                      مسح الكل
+                      <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                      تم التنفيذ
                     </button>
                   </div>
                 </div>
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                {MONTHS_AR.map((month, idx) => (
-                  <motion.button
-                    key={idx}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    type="button"
-                    onClick={() => {
-                      const newMonths = formData.selectedMonths.includes(idx)
-                        ? formData.selectedMonths.filter(m => m !== idx)
-                        : [...formData.selectedMonths, idx];
-                      const datesCount = formData.dates.length || 1;
-                      const recurringCount = newMonths.length + 1;
-                      const gallons = formData.serviceType === 'توصيل مياه' ? (formData.waterGallons || 1) : 1;
-                      const factor = formData.serviceType === 'توصيل مياه' ? (gallons * datesCount) : (datesCount > 1 ? datesCount : formData.monthsCount);
-                      const newTotal = formData.unitPrice * factor * recurringCount;
-                      setFormData({...formData, selectedMonths: newMonths, price: newTotal});
-                    }}
-                    className={cn(
-                      "py-2 px-1 rounded-xl text-[10px] font-bold transition-all border",
-                      formData.selectedMonths.includes(idx)
-                        ? "bg-primary text-white border-primary shadow-md shadow-primary/20 dark:shadow-none"
-                        : "bg-gray-50 dark:bg-slate-800 text-gray-500 dark:text-slate-400 border-transparent hover:border-primary/30"
-                    )}
-                  >
-                    {month}
-                  </motion.button>
-                ))}
               </div>
-              {formData.selectedMonths.length > 0 && (
-                <div className="bg-primary/5 dark:bg-primary/10 p-3 rounded-xl border border-primary/10 dark:border-primary/30 mt-2">
-                  <p className="text-[10px] font-bold text-primary">
-                    سيتم إنشاء {formData.dates.length * (formData.selectedMonths.length + 1)} طلبات إجمالاً ({formData.dates.length} طلبات لكل شهر مختار)
-                  </p>
-                  <p className="text-xs font-black text-primary/80 dark:text-primary/90 mt-1">
-                    التكلفة الإجمالية: {formData.price} ريال
-                  </p>
+
+              {/* Left Column: Dates, Pricing, Recurrence & Notes */}
+              <div className="space-y-6">
+                {/* Dates & Scheduling Section */}
+                <div className="space-y-3">
+                  <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1 font-sans">التواريخ والمواعيد</label>
+                  <div className="space-y-2.5">
+                    {formData.dates.map((d, idx) => (
+                      <div key={idx} className="flex gap-2">
+                        <div className="relative flex-1">
+                          <input 
+                            type="datetime-local"
+                            required
+                            className="w-full pl-4 pr-10 py-3 bg-slate-50 hover:bg-slate-100/70 focus:bg-white dark:bg-slate-800/50 dark:hover:bg-slate-800 focus:dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm text-gray-900 dark:text-white font-black transition-all shadow-sm outline-none font-sans"
+                            value={d}
+                            onChange={e => {
+                              const newDates = [...formData.dates];
+                              newDates[idx] = e.target.value;
+                              if (idx === 0) {
+                                setFormData({...formData, dates: newDates, createdAt: e.target.value});
+                              } else {
+                                setFormData({...formData, dates: newDates});
+                              }
+                            }}
+                          />
+                          <Calendar size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                        </div>
+                        {formData.dates.length > 1 && (
+                          <motion.button 
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            type="button"
+                            onClick={() => {
+                              const newDates = formData.dates.filter((_, i) => i !== idx);
+                              const datesCount = newDates.length || 1;
+                              const recurringCount = formData.isRecurring ? (formData.selectedMonths.length + 1) : 1;
+                              const gallons = formData.serviceType === 'توصيل مياه' ? (formData.waterGallons || 1) : 1;
+                              const factor = formData.serviceType === 'توصيل مياه' ? (gallons * datesCount) : (datesCount > 1 ? datesCount : formData.monthsCount);
+                              const newTotal = formData.unitPrice * factor * recurringCount;
+                              setFormData({...formData, dates: newDates, price: newTotal});
+                            }}
+                            className="p-3 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-900/40 text-rose-600 dark:text-rose-400 rounded-xl transition-all border border-rose-100/10 flex items-center justify-center cursor-pointer"
+                          >
+                            <X size={18} />
+                          </motion.button>
+                        )}
+                      </div>
+                    ))}
+                    {!initialData && (
+                      <motion.button 
+                        whileHover={{ scale: 1.02, translateY: -1 }}
+                        whileTap={{ scale: 0.98 }}
+                        type="button"
+                        onClick={() => {
+                          const defaultDate = getDefaultDate();
+                          const newDates = [...formData.dates, format(defaultDate, "yyyy-MM-dd'T'HH:mm")];
+                          const datesCount = newDates.length;
+                          const recurringCount = formData.isRecurring ? (formData.selectedMonths.length + 1) : 1;
+                          const gallons = formData.serviceType === 'توصيل مياه' ? (formData.waterGallons || 1) : 1;
+                          const factor = formData.serviceType === 'توصيل مياه' ? (gallons * datesCount) : (datesCount > 1 ? datesCount : formData.monthsCount);
+                          const newTotal = formData.unitPrice * factor * recurringCount;
+                          setFormData({...formData, dates: newDates, price: newTotal});
+                        }}
+                        className="w-full py-3 border-2 border-dashed border-slate-200 dark:border-slate-800 hover:border-primary/40 text-slate-400 hover:text-primary rounded-xl transition-all flex items-center justify-center gap-2 font-black text-xs cursor-pointer bg-white dark:bg-transparent font-sans"
+                      >
+                        <Plus size={15} />
+                        إضافة تاريخ آخر
+                      </motion.button>
+                    )}
+                  </div>
                 </div>
-              )}
+
+                {/* Total Price Bento-Style Highlight Card */}
+                <div className="bg-gradient-to-br from-indigo-50/40 to-indigo-50/20 dark:from-indigo-950/20 dark:to-indigo-950/5 p-4 rounded-2xl border border-indigo-100/50 dark:border-indigo-900/30 flex items-center justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest block font-sans">السعر الإجمالي (ريال)</span>
+                    <span className="text-[10px] font-bold text-gray-400 dark:text-slate-400 block font-sans">يتم احتسابه تلقائياً</span>
+                  </div>
+                  <div className="relative w-32">
+                    <input 
+                      type="number"
+                      required
+                      className="w-full pl-4 pr-10 py-2.5 bg-white dark:bg-slate-800 border border-indigo-100 dark:border-indigo-900/40 rounded-xl focus:ring-2 focus:ring-primary focus:border-transparent text-gray-900 dark:text-white font-black text-lg text-center font-mono transition-all shadow-sm outline-none"
+                      value={formData.price}
+                      onChange={e => {
+                        const totalPrice = Number(e.target.value);
+                        const datesCount = formData.dates.length || 1;
+                        const recurringCount = formData.isRecurring ? (formData.selectedMonths.length + 1) : 1;
+                        const gallons = formData.serviceType === 'توصيل مياه' ? (formData.waterGallons || 1) : 1;
+                        const factor = formData.serviceType === 'توصيل مياه' ? (gallons * datesCount) : (datesCount > 1 ? datesCount : formData.monthsCount);
+                        const denominator = factor * recurringCount;
+                        setFormData({
+                          ...formData, 
+                          price: totalPrice,
+                          unitPrice: denominator > 0 ? (totalPrice / denominator) : totalPrice
+                        });
+                      }}
+                    />
+                    <DollarSign size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-indigo-400 pointer-events-none" />
+                  </div>
+                </div>
+
+                {/* Recurrence Toggle Card */}
+                <div className={cn(
+                  "p-1.5 rounded-2xl border transition-all",
+                  formData.isRecurring 
+                    ? "bg-primary/5 dark:bg-primary/10 border-primary/20 dark:border-primary/30" 
+                    : "bg-slate-50/50 dark:bg-slate-800/20 border-slate-100 dark:border-slate-800"
+                )}>
+                  <label htmlFor="isRecurring" className="flex items-center justify-between p-3 cursor-pointer">
+                    <div className="flex items-center gap-3">
+                      <div className={cn(
+                        "w-10 h-10 rounded-xl flex items-center justify-center transition-colors",
+                        formData.isRecurring ? "bg-primary/10 text-primary" : "bg-gray-100 dark:bg-slate-800 text-gray-400"
+                      )}>
+                        <Repeat size={18} className={formData.isRecurring ? "animate-spin" : ""} />
+                      </div>
+                      <div>
+                        <span className="text-sm font-black text-gray-900 dark:text-white block font-sans">تكرار الطلب تلقائياً</span>
+                        <span className="text-[10px] font-bold text-gray-400 dark:text-slate-400 block mt-0.5 font-sans">تكرار هذا الطلب في أشهر أخرى محددة</span>
+                      </div>
+                    </div>
+                    <input 
+                      type="checkbox"
+                      id="isRecurring"
+                      className="w-5 h-5 text-primary rounded-md border-gray-300 focus:ring-primary focus:ring-offset-0 cursor-pointer"
+                      checked={formData.isRecurring}
+                      onChange={e => {
+                        const checked = e.target.checked;
+                        const datesCount = formData.dates.length || 1;
+                        const recurringCount = checked ? (formData.selectedMonths.length + 1) : 1;
+                        const gallons = formData.serviceType === 'توصيل مياه' ? (formData.waterGallons || 1) : 1;
+                        const factor = formData.serviceType === 'توصيل mياه' ? (gallons * datesCount) : (datesCount > 1 ? datesCount : formData.monthsCount);
+                        const newTotal = formData.unitPrice * factor * recurringCount;
+                        setFormData({...formData, isRecurring: checked, price: newTotal});
+                      }}
+                    />
+                  </label>
+                </div>
+
+                {/* Recurrence Options Block */}
+                {formData.isRecurring && (
+                  <div className="space-y-4 p-4 bg-primary/5 dark:bg-primary/10 rounded-2xl border border-primary/10 dark:border-primary/20 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] font-black text-primary uppercase tracking-widest block font-sans">كرر لي اليوم بالشهر</span>
+                        <span className="text-[10px] font-bold text-gray-400 dark:text-slate-400 block font-sans">مثال: اليوم 15 من كل شهر مختار</span>
+                      </div>
+                      <div className="relative w-24">
+                        <input 
+                          type="number"
+                          min="1"
+                          max="31"
+                          className="w-full pl-4 pr-10 py-2.5 bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 rounded-xl focus:ring-2 focus:ring-primary text-sm text-gray-900 dark:text-white font-black text-center transition-all shadow-sm outline-none font-mono"
+                          value={formData.recurrenceDay}
+                          onChange={e => setFormData({...formData, recurrenceDay: Number(e.target.value)})}
+                        />
+                        <CalendarCheck size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  </div>
+                </div>
+
+                <div className="space-y-2.5 pt-2 border-t border-primary/10">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest font-sans">اختر الأشهر للتكرار</label>
+                    <div className="flex items-center gap-3">
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          const baseDate = formData.dates[0] ? new Date(formData.dates[0]) : new Date();
+                          const nextMonth = (baseDate.getMonth() + 1) % 12;
+                          if (!formData.selectedMonths.includes(nextMonth)) {
+                            setFormData({...formData, selectedMonths: [...formData.selectedMonths, nextMonth]});
+                          }
+                        }}
+                        className="text-[10px] font-black text-primary hover:text-primary-dark flex items-center gap-1 cursor-pointer font-sans"
+                      >
+                        <Plus size={12} />
+                        تكرار للشهر القادم
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setFormData({...formData, selectedMonths: []})}
+                        className="text-[10px] font-black text-gray-400 hover:text-gray-600 dark:text-slate-500 cursor-pointer font-sans"
+                      >
+                        مسح الكل
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+                    {MONTHS_AR.map((month, idx) => (
+                      <motion.button
+                        key={idx}
+                        whileHover={{ scale: 1.03 }}
+                        whileTap={{ scale: 0.97 }}
+                        type="button"
+                        onClick={() => {
+                          const newMonths = formData.selectedMonths.includes(idx)
+                            ? formData.selectedMonths.filter(m => m !== idx)
+                            : [...formData.selectedMonths, idx];
+                          const datesCount = formData.dates.length || 1;
+                          const recurringCount = newMonths.length + 1;
+                          const gallons = formData.serviceType === 'توصيل مياه' ? (formData.waterGallons || 1) : 1;
+                          const factor = formData.serviceType === 'توصيل مياه' ? (gallons * datesCount) : (datesCount > 1 ? datesCount : formData.monthsCount);
+                          const newTotal = formData.unitPrice * factor * recurringCount;
+                          setFormData({...formData, selectedMonths: newMonths, price: newTotal});
+                        }}
+                        className={cn(
+                          "py-2 px-1 rounded-none text-[10px] font-black transition-all border cursor-pointer font-sans",
+                          formData.selectedMonths.includes(idx)
+                            ? "bg-primary text-white border-primary shadow-md shadow-primary/20 dark:shadow-none"
+                            : "bg-white dark:bg-slate-800 text-gray-500 dark:text-slate-400 border-slate-200/60 dark:border-slate-700/60 hover:border-primary/40"
+                        )}
+                      >
+                        {month}
+                      </motion.button>
+                    ))}
+                  </div>
+                  
+                  {formData.selectedMonths.length > 0 && (
+                    <div className="bg-primary/5 dark:bg-primary/20 p-3 rounded-none border border-primary/10 dark:border-primary/30 mt-2 text-center font-sans">
+                      <p className="text-[10px] font-bold text-primary">
+                        سيتم إنشاء <span className="font-black text-sm font-mono">{formData.dates.length * (formData.selectedMonths.length + 1)}</span> طلبات إجمالاً ({formData.dates.length} طلبات لكل شهر مختار)
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Additional Notes textfield */}
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1 font-sans">ملاحظات إضافية</label>
+              <div className="relative">
+                <textarea 
+                  className="w-full pl-4 pr-10 py-3 bg-slate-50 hover:bg-slate-100/70 focus:bg-white dark:bg-slate-800/50 dark:hover:bg-slate-800 focus:dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 rounded-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm text-gray-900 dark:text-white font-black transition-all min-h-[85px] resize-y outline-none font-sans"
+                  placeholder="أي تفاصيل إضافية..."
+                  value={formData.notes}
+                  onChange={e => setFormData({...formData, notes: e.target.value})}
+                />
+                <FileText size={16} className="absolute right-3.5 top-4 text-gray-400 pointer-events-none" />
+              </div>
             </div>
           </div>
-          )}
+        </div>
+      </div>
 
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest px-1">ملاحظات إضافية</label>
-            <textarea 
-              className="w-full p-3 bg-gray-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 focus:ring-primary text-sm text-gray-900 dark:text-white font-bold transition-all min-h-[80px] resize-y"
-              placeholder="أي تفاصيل إضافية..."
-              value={formData.notes}
-              onChange={e => setFormData({...formData, notes: e.target.value})}
-            />
-          </div>
-          <div className="pt-2 flex gap-3">
+          {/* Fixed Sticky Footer Actions */}
+          <div className="p-6 border-t border-gray-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50 flex gap-3 z-10">
             <motion.button 
-              whileHover={{ scale: 1.02 }}
+              whileHover={{ scale: 1.02, translateY: -1 }}
               whileTap={{ scale: 0.98 }}
               type="submit"
-              className="flex-1 bg-primary hover:bg-primary-dark text-white py-3.5 rounded-xl font-black text-base shadow-lg shadow-primary/20 dark:shadow-none transition-all flex items-center justify-center gap-2"
+              className="flex-1 bg-primary hover:bg-primary-dark text-white py-4 rounded-none font-black text-sm shadow-xl shadow-primary/20 dark:shadow-none transition-all flex items-center justify-center gap-2 cursor-pointer font-sans"
             >
               <Save size={18} />
               {initialData ? 'حفظ التعديلات' : 'تأكيد الطلب'}
@@ -4165,7 +4505,7 @@ const BookingModal = ({
               whileTap={{ scale: 0.98 }}
               type="button"
               onClick={onClose}
-              className="px-6 py-3.5 bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400 rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-slate-700 transition-all"
+              className="px-8 py-4 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-500 dark:text-slate-400 rounded-none font-black text-sm transition-all cursor-pointer font-sans"
             >
               إلغاء
             </motion.button>
@@ -5061,16 +5401,204 @@ const TenantModal = ({ isOpen, onClose, onSave, initialData, apartments }: any) 
   );
 };
 
+const ReceiptPrintPreviewModal = ({
+  isOpen,
+  onClose,
+  subscription,
+  onPrint,
+  contentRef,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  subscription: ClubSubscription | null;
+  onPrint: () => void;
+  contentRef: React.RefObject<HTMLDivElement | null>;
+}) => {
+  if (!subscription) return null;
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 overflow-y-auto">
+          {/* Backdrop */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={onClose}
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm"
+          />
+
+          {/* Modal Content */}
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.95, opacity: 0, y: 20 }}
+            className="relative bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl border border-gray-100 dark:border-slate-800 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col z-10"
+          >
+            {/* Header */}
+            <div className="p-6 border-b border-gray-100 dark:border-slate-800 flex justify-between items-center bg-gray-50 dark:bg-slate-800/50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-teal-50 dark:bg-teal-900/30 rounded-xl flex items-center justify-center text-teal-600 dark:text-teal-400">
+                  <ReceiptIcon size={20} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-gray-900 dark:text-white font-cairo">معاينة سند القبض</h3>
+                  <p className="text-xs text-gray-400 dark:text-slate-400 font-bold mt-0.5">يرجى التأكد من تفاصيل السند قبل الطباعة</p>
+                </div>
+              </div>
+              <button
+                onClick={onClose}
+                className="w-10 h-10 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-400 hover:text-gray-600 transition-colors flex items-center justify-center cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Content (Scrollable Print Sheet Preview) */}
+            <div className="p-8 overflow-y-auto bg-slate-100 dark:bg-slate-950 flex justify-center flex-1">
+              <div className="bg-white text-black p-1 shadow-md rounded-xl max-w-full overflow-x-auto">
+                <ReceiptClubSub ref={contentRef} subscription={subscription} />
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div className="p-6 border-t border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/30 flex flex-col gap-4">
+              <div className="flex gap-4">
+                <button
+                  type="button"
+                  onClick={onPrint}
+                  className="flex-1 h-14 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-sm shadow-xl shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Printer size={18} />
+                  تأكيد وطباعة السند
+                </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="w-32 h-14 bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-400 hover:bg-gray-200 dark:hover:bg-slate-700 rounded-2xl font-black text-sm transition-all cursor-pointer"
+                >
+                  إلغاء
+                </button>
+              </div>
+              <p className="text-[11px] text-amber-600 dark:text-amber-400 font-bold text-center bg-amber-50 dark:bg-amber-950/20 p-3 rounded-xl border border-amber-100 dark:border-amber-950/40">
+                ⚠️ تنبيه: إذا كنت تقوم بالمعاينة داخل منصة التطوير ولم تظهر نافذة الطباعة بعد الضغط على "تأكيد وطباعة السند"، يرجى فتح التطبيق في علامة تبويب جديدة ثم إعادة المحاولة.
+              </p>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+};
+
+const PledgePrintPreviewModal = ({
+  isOpen,
+  onClose,
+  subscription,
+  tenants,
+  onPrint,
+  contentRef,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  subscription: ClubSubscription | null;
+  tenants: Tenant[];
+  onPrint: () => void;
+  contentRef: React.RefObject<HTMLDivElement | null>;
+}) => {
+  if (!subscription) return null;
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 overflow-y-auto">
+          {/* Backdrop */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={onClose}
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm"
+          />
+
+          {/* Modal Content */}
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.95, opacity: 0, y: 20 }}
+            className="relative bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl border border-gray-100 dark:border-slate-800 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col z-10"
+          >
+            {/* Header */}
+            <div className="p-6 border-b border-gray-100 dark:border-slate-800 flex justify-between items-center bg-gray-50 dark:bg-slate-800/50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                  <Printer size={20} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-gray-900 dark:text-white font-cairo">معاينة إقرار وتعهد الاشتراك</h3>
+                  <p className="text-xs text-gray-400 dark:text-slate-400 font-bold mt-0.5">يرجى مراجعة نص التعهد والبيانات قبل الطباعة</p>
+                </div>
+              </div>
+              <button
+                onClick={onClose}
+                className="w-10 h-10 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-400 hover:text-gray-600 transition-colors flex items-center justify-center cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Content (Scrollable Print Sheet Preview) */}
+            <div className="p-8 overflow-y-auto bg-slate-100 dark:bg-slate-950 flex justify-center flex-1">
+              <div className="bg-white text-black p-1 shadow-md rounded-xl max-w-full overflow-x-auto">
+                <div className="bg-white" style={{ width: '210mm', minWidth: '210mm' }}>
+                  <ClubSubscriptionForm ref={contentRef} subscription={subscription} tenants={tenants} />
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div className="p-6 border-t border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/30 flex flex-col gap-4">
+              <div className="flex gap-4">
+                <button
+                  type="button"
+                  onClick={onPrint}
+                  className="flex-1 h-14 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-sm shadow-xl shadow-indigo-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Printer size={18} />
+                  تأكيد وطباعة التعهد
+                </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="w-32 h-14 bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-400 hover:bg-gray-200 dark:hover:bg-slate-700 rounded-2xl font-black text-sm transition-all cursor-pointer"
+                >
+                  إلغاء
+                </button>
+              </div>
+              <p className="text-[11px] text-amber-600 dark:text-amber-400 font-bold text-center bg-amber-50 dark:bg-amber-950/20 p-3 rounded-xl border border-amber-100 dark:border-amber-950/40">
+                ⚠️ تنبيه: إذا كنت تقوم بالمعاينة داخل منصة التطوير ولم تظهر نافذة الطباعة بعد الضغط على "تأكيد وطباعة التعهد"، يرجى فتح التطبيق في علامة تبويب جديدة ثم إعادة المحاولة.
+              </p>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+};
+
 const ClubSubPrintModal = ({ 
   isOpen, 
   onClose, 
   subscriptions, 
-  onPrint 
+  onPrint,
+  onPrintReceipt
 }: { 
   isOpen: boolean; 
   onClose: () => void; 
   subscriptions: ClubSubscription[]; 
   onPrint: (sub: ClubSubscription) => void;
+  onPrintReceipt?: (sub: ClubSubscription) => void;
 }) => {
   const [selectedSubId, setSelectedSubId] = useState<string>('');
 
@@ -5151,21 +5679,40 @@ const ClubSubPrintModal = ({
                   </div>
                 )}
 
-                <div className="flex gap-3 pt-4">
+                <div className="flex flex-col gap-3 pt-4">
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={handlePrintSubmit}
+                      className="flex-1 h-14 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-sm shadow-xl shadow-emerald-500/20 transition-all flex items-center justify-center gap-2"
+                    >
+                      <Printer size={18} />
+                      طباعة التعهد
+                    </button>
+                    
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (selectedSub) {
+                          onPrintReceipt?.(selectedSub);
+                          onClose();
+                        } else {
+                          toast.error('يرجى تحديد مشترك لطباعة سند القبض له');
+                        }
+                      }}
+                      className="flex-1 h-14 bg-teal-600 hover:bg-teal-700 text-white rounded-2xl font-black text-sm shadow-xl shadow-teal-500/20 transition-all flex items-center justify-center gap-2"
+                    >
+                      <ReceiptIcon size={18} />
+                      طباعة سند القبض
+                    </button>
+                  </div>
+                  
                   <button
                     type="button"
                     onClick={onClose}
-                    className="flex-1 h-14 bg-gray-100 dark:bg-slate-800 text-gray-500 hover:bg-gray-200 dark:hover:bg-slate-700 rounded-2xl font-black text-sm transition-all"
+                    className="w-full h-14 bg-gray-100 dark:bg-slate-800 text-gray-500 hover:bg-gray-200 dark:hover:bg-slate-700 rounded-2xl font-black text-sm transition-all"
                   >
                     إلغاء
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handlePrintSubmit}
-                    className="flex-1 h-14 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-sm shadow-xl shadow-emerald-500/20 transition-all flex items-center justify-center gap-2"
-                  >
-                    <Printer size={18} />
-                    طباعة التعهد
                   </button>
                 </div>
               </div>
@@ -6269,6 +6816,7 @@ function AppContent() {
     });
   };
   const [viewMode, setViewMode] = useState<'list' | 'summary' | 'calendar'>('list');
+  const [selectedRequestIds, setSelectedRequestIds] = useState<string[]>([]);
   const [selectedApartment, setSelectedApartment] = useState<{ building: string, apartment: string } | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const navRef = useRef<HTMLDivElement>(null);
@@ -6296,6 +6844,8 @@ function AppContent() {
   };
 
   const [selectedRequest, setSelectedRequest] = useState<CleaningRequest | null>(null);
+  const [selectedReceiptRequest, setSelectedReceiptRequest] = useState<CleaningRequest | null>(null);
+  const [selectedReceiptClubSub, setSelectedReceiptClubSub] = useState<ClubSubscription | null>(null);
   const [isPrintingStatement, setIsPrintingStatement] = useState(false);
   const [filteredStatementRequests, setFilteredStatementRequests] = useState<CleaningRequest[]>([]);
   const [isPrintingReport, setIsPrintingReport] = useState(false);
@@ -6404,6 +6954,8 @@ function AppContent() {
   }, []);
 
   const invoiceRef = useRef<HTMLDivElement>(null);
+  const receiptRef = useRef<HTMLDivElement>(null);
+  const receiptClubSubRef = useRef<HTMLDivElement>(null);
   const statementRef = useRef<HTMLDivElement>(null);
   const reportRef = useRef<HTMLDivElement>(null);
   const inventoryReportRef = useRef<HTMLDivElement>(null);
@@ -6884,6 +7436,16 @@ function AppContent() {
     onAfterPrint: () => setSelectedRequest(null),
   });
 
+  const handlePrintReceipt = useReactToPrint({
+    contentRef: receiptRef,
+    onAfterPrint: () => setSelectedReceiptRequest(null),
+  });
+
+  const handlePrintReceiptClubSub = useReactToPrint({
+    contentRef: receiptClubSubRef,
+    onAfterPrint: () => setSelectedReceiptClubSub(null),
+  });
+
   const handlePrintStatement = useReactToPrint({
     contentRef: statementRef,
     onAfterPrint: () => {
@@ -6921,16 +7483,56 @@ function AppContent() {
   });
 
   useEffect(() => {
+    let active = true;
+    let retryCount = 0;
+
     if (selectedRequest) {
-      // Small delay to ensure the Invoice component is rendered and QR code is generated
-      const timer = setTimeout(() => {
+      const checkAndPrint = () => {
+        if (!active) return;
         if (invoiceRef.current) {
           handlePrint();
+        } else if (retryCount < 10) {
+          retryCount++;
+          setTimeout(checkAndPrint, 100);
+        } else {
+          setSelectedRequest(null);
+          toast.error('حدث خطأ أثناء تهيئة نموذج الطباعة. يرجى المحاولة مرة أخرى.');
         }
-      }, 300);
-      return () => clearTimeout(timer);
+      };
+
+      const timer = setTimeout(checkAndPrint, 150);
+      return () => {
+        active = false;
+        clearTimeout(timer);
+      };
     }
   }, [selectedRequest, handlePrint]);
+
+  useEffect(() => {
+    let active = true;
+    let retryCount = 0;
+
+    if (selectedReceiptRequest) {
+      const checkAndPrint = () => {
+        if (!active) return;
+        if (receiptRef.current) {
+          handlePrintReceipt();
+        } else if (retryCount < 10) {
+          retryCount++;
+          setTimeout(checkAndPrint, 100);
+        } else {
+          setSelectedReceiptRequest(null);
+          toast.error('حدث خطأ أثناء تهيئة نموذج طباعة السند. يرجى المحاولة مرة أخرى.');
+        }
+      };
+
+      const timer = setTimeout(checkAndPrint, 150);
+      return () => {
+        active = false;
+        clearTimeout(timer);
+      };
+    }
+  }, [selectedReceiptRequest, handlePrintReceipt]);
 
   useEffect(() => {
     if (isPrintingStatement) {
@@ -6986,32 +7588,6 @@ function AppContent() {
       return () => clearTimeout(timer);
     }
   }, [isPrintingBulk, handlePrintBulk]);
-
-  useEffect(() => {
-    let active = true;
-    let retryCount = 0;
-
-    if (selectedClubSubForPrint) {
-      const checkAndPrint = () => {
-        if (!active) return;
-        if (clubSubscriptionFormRef.current) {
-          handlePrintClubSub();
-        } else if (retryCount < 10) {
-          retryCount++;
-          setTimeout(checkAndPrint, 100);
-        } else {
-          setSelectedClubSubForPrint(null);
-          toast.error('حدث خطأ أثناء تهيئة نموذج الطباعة. يرجى المحاولة مرة أخرى.');
-        }
-      };
-
-      const timer = setTimeout(checkAndPrint, 250);
-      return () => {
-        active = false;
-        clearTimeout(timer);
-      };
-    }
-  }, [selectedClubSubForPrint, handlePrintClubSub]);
 
   const calendarDays = React.useMemo(() => {
     const start = startOfWeek(startOfMonth(selectedMonth));
@@ -8700,6 +9276,52 @@ function AppContent() {
     }
   };
 
+  const copySelectedRequestsToNextMonth = async () => {
+    if (selectedRequestIds.length === 0) {
+      toast.error('يرجى تحديد طلب واحد على الأقل للنسخ');
+      return;
+    }
+
+    const nextMonth = addMonths(selectedMonth, 1);
+    const toastId = toast.loading(`جاري نسخ ${selectedRequestIds.length} طلب إلى شهر ${format(nextMonth, 'MMMM yyyy', { locale: ar })}...`);
+
+    try {
+      const selectedReqs = requests.filter(r => selectedRequestIds.includes(r.id));
+      
+      const promises = selectedReqs.map(req => {
+        const sourceDate = safeToDate(req.date);
+        let targetDate = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), sourceDate.getDate());
+        
+        if (targetDate.getMonth() !== nextMonth.getMonth()) {
+          targetDate = endOfMonth(nextMonth);
+        }
+
+        targetDate.setHours(sourceDate.getHours(), sourceDate.getMinutes(), 0, 0);
+
+        const { id, ...newReqData } = req;
+        return addDoc(collection(db, 'requests'), {
+          ...newReqData,
+          date: targetDate,
+          createdAt: serverTimestamp(),
+          status: 'pending',
+          paymentStatus: 'unpaid',
+          receiptUrl: null,
+          beforePhotoUrl: null,
+          afterPhotoUrl: null,
+          completedDates: []
+        });
+      });
+
+      await Promise.all(promises);
+      setSelectedRequestIds([]);
+      setSelectedMonth(nextMonth);
+      toast.success(`تم نسخ ${selectedReqs.length} طلب بنجاح للشهر التالي (${format(nextMonth, 'MMMM yyyy', { locale: ar })})`, { id: toastId });
+    } catch (error) {
+      console.error(error);
+      toast.error('حدث خطأ أثناء نسخ الطلبات المحددة', { id: toastId });
+    }
+  };
+
   const deleteInventoryLog = async (id: string) => {
     try {
       await deleteDoc(doc(db, 'inventoryLogs', id));
@@ -8865,8 +9487,8 @@ function AppContent() {
       end: endOfDay(addDays(new Date(), 7))
     });
     
-    const matchesMonth = (activeTab === 'dashboard' || activeTab === 'daily-tasks') 
-      ? (isUpcoming || isSameMonth(reqDate, selectedMonth))
+    const matchesMonth = (activeTab === 'daily-tasks' && dailyTasksView === 'today')
+      ? isSameDay(reqDate, new Date())
       : isSameMonth(reqDate, selectedMonth);
       
     const matchesSearch = (req.apartmentNumber || '').includes(searchTerm) || (req.buildingName || '').includes(searchTerm);
@@ -8911,34 +9533,18 @@ function AppContent() {
     }> = {};
 
     filteredRequests.forEach(req => {
-      const reqDate = safeToDate(req.date);
-      const monthStr = format(reqDate, 'yyyy-MM');
-      const key = `${req.buildingName}-${req.apartmentNumber}-${req.serviceType}-${monthStr}`;
+      const key = req.id;
       if (!groups[key]) {
         groups[key] = {
           latest: req,
-          count: 0,
-          totalPrice: 0,
-          totalWaterGallons: 0,
-          totalMonthsCount: 0,
-          allCompleted: true,
-          allPaid: true,
-          ids: []
+          count: 1,
+          totalPrice: req.price || 0,
+          totalWaterGallons: req.waterGallons || 0,
+          totalMonthsCount: req.monthsCount || 0,
+          allCompleted: req.status === 'completed',
+          allPaid: req.paymentStatus === 'paid',
+          ids: [req.id]
         };
-      }
-      
-      groups[key].count += 1;
-      groups[key].totalPrice += req.price;
-      groups[key].totalWaterGallons += (req.waterGallons || 0);
-      groups[key].totalMonthsCount += (req.monthsCount || 0);
-      groups[key].ids.push(req.id);
-      
-      if (req.status !== 'completed') groups[key].allCompleted = false;
-      if (req.paymentStatus !== 'paid') groups[key].allPaid = false;
-      
-      // Keep most recent as representative
-      if (safeToDate(req.date) > safeToDate(groups[key].latest.date)) {
-        groups[key].latest = req;
       }
     });
 
@@ -8981,8 +9587,8 @@ function AppContent() {
   const stats = {
     total: requests.filter(r => isSameMonth(safeToDate(r.date), selectedMonth)).length + 
            clubSubscriptions.filter(s => isSameMonth(safeToDate(s.startDate || s.createdAt), selectedMonth)).length,
-    paid: requests.filter(r => r.paymentStatus === 'paid' && isSameMonth(safeToDate(r.paymentDate || r.date), selectedMonth)).reduce((s, r) => s + Number(r.price || 0), 0) +
-          clubSubscriptions.filter(s => s.paymentStatus === 'paid' && isSameMonth(safeToDate(s.paymentDate || s.startDate || s.createdAt), selectedMonth)).reduce((sum, s) => sum + Number(s.collectedAmount || s.totalPrice || 0), 0),
+    paid: requests.filter(r => r.paymentStatus === 'paid' && isSameMonth(safeToDate(r.date), selectedMonth)).reduce((s, r) => s + Number(r.price || 0), 0) +
+          clubSubscriptions.filter(s => s.paymentStatus === 'paid' && isSameMonth(safeToDate(s.startDate || s.createdAt), selectedMonth)).reduce((sum, s) => sum + Number(s.collectedAmount || s.totalPrice || 0), 0),
     totalMonthly: requests.filter(r => isSameMonth(safeToDate(r.date), selectedMonth)).length +
                   clubSubscriptions.filter(s => isSameMonth(safeToDate(s.startDate || s.createdAt), selectedMonth)).length,
     unpaid: requests.filter(r => isSameMonth(safeToDate(r.date), selectedMonth) && r.paymentStatus === 'unpaid').reduce((s, r) => s + Number(r.price || 0), 0) +
@@ -8992,8 +9598,8 @@ function AppContent() {
     unpaidApartments: requests.filter(r => isSameMonth(safeToDate(r.date), selectedMonth) && r.paymentStatus === 'unpaid' && r.serviceType !== 'تنظيف سيارات').length,
     unpaidCars: requests.filter(r => isSameMonth(safeToDate(r.date), selectedMonth) && r.paymentStatus === 'unpaid' && r.serviceType === 'تنظيف سيارات').length,
     completed: requests.filter(r => isSameMonth(safeToDate(r.date), selectedMonth) && r.status === 'completed').length,
-    paidCount: requests.filter(r => r.paymentStatus === 'paid' && isSameMonth(safeToDate(r.paymentDate || r.date), selectedMonth)).length +
-               clubSubscriptions.filter(s => s.paymentStatus === 'paid' && isSameMonth(safeToDate(s.paymentDate || s.startDate || s.createdAt), selectedMonth)).length,
+    paidCount: requests.filter(r => r.paymentStatus === 'paid' && isSameMonth(safeToDate(r.date), selectedMonth)).length +
+               clubSubscriptions.filter(s => s.paymentStatus === 'paid' && isSameMonth(safeToDate(s.startDate || s.createdAt), selectedMonth)).length,
     pending: requests.filter(r => isSameMonth(safeToDate(r.date), selectedMonth) && r.status === 'pending').length,
     recurring: requests.filter(r => isSameMonth(safeToDate(r.date), selectedMonth) && r.isRecurring).length,
   };
@@ -12022,15 +12628,6 @@ function AppContent() {
 
                         <motion.button
                           whileHover={{ scale: 1.1, translateY: -2 }}
-                          onClick={() => setSelectedClubSubForPrint(sub)}
-                          className="w-10 h-10 flex items-center justify-center rounded-[1.1rem] text-emerald-600 border border-emerald-50 bg-emerald-50/40 hover:bg-emerald-100 hover:border-emerald-200 transition-all shadow-sm dark:bg-slate-800/50 dark:border-slate-700 cursor-pointer"
-                          title="طباعة التعهد وإقرار الاشتراك"
-                        >
-                          <Printer size={16} strokeWidth={2.5} />
-                        </motion.button>
-
-                        <motion.button
-                          whileHover={{ scale: 1.1, translateY: -2 }}
                           onClick={() => updateClubSubPaymentStatus(sub.id, sub.paymentStatus === 'paid' ? 'unpaid' : 'paid')}
                           className={cn(
                             "w-10 h-10 flex items-center justify-center rounded-[1.1rem] transition-all border",
@@ -13782,7 +14379,7 @@ function AppContent() {
                                     // Generate on the fly for old entries without saved payments
                                     const start = safeToDate(sub.subscriptionStartDate || sub.date);
                                     const end = safeToDate(sub.subscriptionEndDate);
-                                    const generated: { monthKey: string; monthName: string; isPaid: boolean; amount: number; paidDate?: string }[] = [];
+                                    const generated = [];
                                     let curr = startOfMonth(start);
                                     const tEnd = startOfMonth(end);
                                     const perMonthAmount = Math.round(sub.price / (sub.monthsCount || 1));
@@ -14006,7 +14603,7 @@ function AppContent() {
                 <h3 className="text-xl font-black text-gray-900 dark:text-white font-cairo">
                   {viewMode === 'list' ? 'سجل الطلبات التفصيلي' : viewMode === 'summary' ? 'ملخص الشقق' : 'تقويم الطلبات'}
                 </h3>
-                <div className="flex bg-gray-50 dark:bg-slate-800 p-1.5 rounded-[1.25rem] border border-gray-100 dark:border-slate-700/50 w-fit">
+                <div className="flex bg-gray-50 dark:bg-slate-800 p-1.5 rounded-[1.25rem] border border-gray-100 dark:border-slate-700/55 w-fit">
                   <button 
                     onClick={() => setViewMode('list')}
                     className={cn(
@@ -14043,6 +14640,17 @@ function AppContent() {
                 </div>
               </div>
               <div className="flex flex-wrap gap-3 items-center">
+                {selectedRequestIds.length > 0 && (
+                  <motion.button 
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={copySelectedRequestsToNextMonth}
+                    className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white rounded-2xl text-xs font-black shadow-lg shadow-indigo-200/50 dark:shadow-none transition-all border border-indigo-500/20"
+                  >
+                    <CalendarPlus size={14} />
+                    <span>نسخ المحددة للشهر التالي ({selectedRequestIds.length})</span>
+                  </motion.button>
+                )}
                 <motion.button 
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
@@ -14069,21 +14677,37 @@ function AppContent() {
                 </div>
               </div>
             </div>
- 
+
             <div className="overflow-x-auto custom-scrollbar">
               {viewMode === 'list' ? (
                 <table className="w-full text-right border-collapse">
                   <thead>
-                    <tr className="bg-gray-50/70 dark:bg-slate-800/30 text-slate-400 dark:text-slate-500 text-[11px] font-black uppercase tracking-wider border-b border-gray-100 dark:border-slate-800/50">
-                      <th className="px-6 py-5 text-right font-cairo">رقم الشقة</th>
-                      <th className="px-6 py-5 text-right font-cairo">الخدمة</th>
-                      <th className="px-6 py-5 text-right font-cairo">التاريخ</th>
-                      <th className="px-6 py-5 text-center font-cairo">العدد</th>
-                      <th className="px-6 py-5 text-center font-cairo">المبلغ</th>
-                      <th className="px-6 py-5 text-center font-cairo">الحالة</th>
-                      <th className="px-6 py-5 text-center font-cairo">التحصيل</th>
-                      <th className="px-6 py-5 text-center font-cairo">الإيصال</th>
-                      <th className="px-6 py-5 text-center font-cairo">إجراءات</th>
+                    <tr className="bg-slate-50/80 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 text-xs font-bold border-b border-slate-100 dark:border-slate-800/80 transition-colors">
+                      <th className="px-6 py-4.5 text-center font-cairo w-12">
+                        <input 
+                          type="checkbox"
+                          checked={groupedFilteredRequests.length > 0 && groupedFilteredRequests.every(g => g.ids.every(id => selectedRequestIds.includes(id)))}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              const allIds = groupedFilteredRequests.flatMap(g => g.ids);
+                              setSelectedRequestIds(prev => Array.from(new Set([...prev, ...allIds])));
+                            } else {
+                              const allIds = groupedFilteredRequests.flatMap(g => g.ids);
+                              setSelectedRequestIds(prev => prev.filter(id => !allIds.includes(id)));
+                            }
+                          }}
+                          className="w-4 h-4 text-primary focus:ring-primary border-slate-300 dark:border-slate-750 rounded cursor-pointer transition-all accent-primary"
+                        />
+                      </th>
+                      <th className="px-6 py-4.5 text-right font-cairo font-bold">رقم الشقة</th>
+                      <th className="px-6 py-4.5 text-right font-cairo font-bold">الخدمة</th>
+                      <th className="px-6 py-4.5 text-right font-cairo font-bold">التاريخ</th>
+                      <th className="px-6 py-4.5 text-center font-cairo font-bold">العدد</th>
+                      <th className="px-6 py-4.5 text-center font-cairo font-bold">المبلغ</th>
+                      <th className="px-6 py-4.5 text-center font-cairo font-bold">الحالة</th>
+                      <th className="px-6 py-4.5 text-center font-cairo font-bold">التحصيل</th>
+                      <th className="px-6 py-4.5 text-center font-cairo font-bold">الإيصال</th>
+                      <th className="px-6 py-4.5 text-center font-cairo font-bold">إجراءات</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100/50 dark:divide-slate-800/50">
@@ -14092,8 +14716,7 @@ function AppContent() {
                         groupedFilteredRequests.map((group) => {
                           const displayReq = group.latest;
                           const hasMultiple = group.count > 1;
- 
-                          // Custom color palettes for services
+
                           let serviceBadgeClass = "bg-slate-50 text-slate-700 dark:bg-slate-800 dark:text-slate-300";
                           if (displayReq.serviceType.includes('سيارات')) {
                             serviceBadgeClass = "bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 border border-indigo-100/30 dark:border-indigo-900/20";
@@ -14106,7 +14729,7 @@ function AppContent() {
                           } else if (displayReq.serviceType.includes('ألعاب')) {
                             serviceBadgeClass = "bg-purple-50 dark:bg-purple-950/30 text-purple-600 dark:text-purple-400 border border-purple-100/30 dark:border-purple-900/20";
                           }
- 
+
                           return (
                             <motion.tr 
                               key={displayReq.id}
@@ -14128,6 +14751,20 @@ function AppContent() {
                                 }
                               }}
                             >
+                              <td className="px-6 py-4 text-center w-12" onClick={(e) => e.stopPropagation()}>
+                                <input 
+                                  type="checkbox"
+                                  checked={group.ids.every(id => selectedRequestIds.includes(id))}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedRequestIds(prev => Array.from(new Set([...prev, ...group.ids])));
+                                    } else {
+                                      setSelectedRequestIds(prev => prev.filter(id => !group.ids.includes(id)));
+                                    }
+                                  }}
+                                  className="w-4 h-4 text-primary focus:ring-primary border-gray-300 rounded cursor-pointer"
+                                />
+                              </td>
                               <td className="px-6 py-4 text-right">
                                 <div className="flex items-center gap-3">
                                   <div className="bg-primary/5 dark:bg-primary/20 p-2.5 rounded-2xl text-primary transition-transform group-hover/row:scale-110">
@@ -14187,7 +14824,6 @@ function AppContent() {
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     if (hasMultiple) {
-                                      // Toggle all in group
                                       const nextStatus = group.allCompleted ? 'pending' : 'completed';
                                       group.ids.forEach(id => updateStatus(id, 'status', nextStatus));
                                     } else {
@@ -14196,21 +14832,21 @@ function AppContent() {
                                     }
                                   }}
                                   className={cn(
-                                    "flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[11px] font-black shadow-sm transition-all mx-auto border",
+                                    "flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[11px] font-black shadow-sm transition-all mx-auto border cursor-pointer",
                                     group.allCompleted 
-                                      ? "bg-emerald-500 text-white border-emerald-600/20" 
-                                      : "bg-amber-500 text-white border-amber-600/20"
+                                      ? "bg-gradient-to-r from-emerald-500 to-teal-500 text-white border-emerald-600/10 shadow-sm shadow-emerald-100/10 dark:shadow-none" 
+                                      : "bg-gradient-to-r from-amber-500 to-orange-500 text-white border-amber-600/10 shadow-sm shadow-amber-100/10 dark:shadow-none"
                                   )}
                                 >
-                                  {group.allCompleted ? <CheckCircle2 size={13} /> : <Clock size={13} />}
+                                  {group.allCompleted ? <CheckCircle2 size={13} className="text-white" /> : <Clock size={13} className="text-white" />}
                                   <span>{group.allCompleted ? 'منفذة ' : 'قيد التنفيذ'}</span>
                                 </motion.button>
                               </td>
-                              <td className="px-6 py-4 text-center">
-                                <div className="flex items-center justify-center gap-1.5 mx-auto">
+                              <td className="px-6 py-4.5 text-center">
+                                <div className="flex items-center justify-center gap-2 mx-auto">
                                   <motion.button 
-                                    whileHover={{ scale: 1.05 }}
-                                    whileTap={{ scale: 0.95 }}
+                                    whileHover={{ scale: 1.03 }}
+                                    whileTap={{ scale: 0.97 }}
                                     onClick={async (e) => {
                                       e.stopPropagation();
                                       if (hasMultiple) {
@@ -14223,19 +14859,19 @@ function AppContent() {
                                       }
                                     }}
                                     className={cn(
-                                      "flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[11px] font-black shadow-sm transition-all border shrink-0",
+                                      "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold shadow-sm/5 transition-all border shrink-0 cursor-pointer",
                                       group.allPaid 
-                                        ? "bg-teal-50 dark:bg-teal-950/20 text-teal-700 dark:text-teal-400 border-teal-200/50" 
-                                        : "bg-rose-50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-450 border-rose-200/50"
+                                        ? "bg-teal-50 text-teal-700 border-teal-200/60 dark:bg-teal-950/20 dark:text-teal-400 dark:border-teal-900/30" 
+                                        : "bg-rose-50 text-rose-700 border-rose-200/60 dark:bg-rose-950/20 dark:text-rose-400 dark:border-rose-900/30"
                                     )}
                                   >
-                                    <CreditCard size={13} />
+                                    <CreditCard size={13} className={group.allPaid ? "text-teal-600 dark:text-teal-400" : "text-rose-600 dark:text-rose-450"} />
                                     <span>{group.allPaid ? 'تم الدفع' : 'لم يدفع'}</span>
                                   </motion.button>
 
                                   <motion.button
-                                    whileHover={{ scale: 1.1 }}
-                                    whileTap={{ scale: 0.9 }}
+                                    whileHover={{ scale: 1.08 }}
+                                    whileTap={{ scale: 0.92 }}
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       const aptNum = displayReq.serviceType === 'تنظيف سيارات' ? getApartmentNum(displayReq) : displayReq.apartmentNumber;
@@ -14257,18 +14893,18 @@ function AppContent() {
                                         window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
                                       }
                                     }}
-                                    className="p-2 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 rounded-full transition-all border border-emerald-200/30 shrink-0"
+                                    className="p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 dark:bg-emerald-950/30 dark:hover:bg-emerald-900/30 dark:text-emerald-400 rounded-xl transition-all border border-emerald-200/40 dark:border-emerald-800/20 shrink-0 cursor-pointer"
                                     title="إرسال تأكيد الدفع عبر الواتساب"
                                   >
-                                    <MessageCircle size={13} />
+                                    <MessageCircle size={14} />
                                   </motion.button>
                                 </div>
                               </td>
-                              <td className="px-6 py-4 text-center">
+                              <td className="px-6 py-4.5 text-center">
                                 <div className="flex items-center justify-center gap-2">
                                   {!hasMultiple && (
                                     <>
-                                      <label className="cursor-pointer p-2 hover:bg-slate-50 dark:hover:bg-slate-800 hover:shadow-sm rounded-xl text-slate-400 hover:text-primary dark:text-slate-500 dark:hover:text-primary transition-all border border-gray-100 dark:border-slate-800">
+                                      <label className="cursor-pointer p-2 hover:bg-slate-50 dark:hover:bg-slate-800/80 hover:shadow-sm rounded-xl text-slate-400 hover:text-primary dark:text-slate-500 dark:hover:text-primary transition-all border border-slate-200 dark:border-slate-800">
                                         <input 
                                           type="file" 
                                           className="hidden" 
@@ -14278,7 +14914,7 @@ function AppContent() {
                                             if (file) handleReceiptUpload(displayReq.id, file);
                                           }}
                                         />
-                                        <Upload size={16} />
+                                        <Upload size={14} />
                                       </label>
                                       {displayReq.receiptUrl && (
                                         <button 
@@ -14286,63 +14922,76 @@ function AppContent() {
                                             e.stopPropagation();
                                             window.open(displayReq.receiptUrl, '_blank');
                                           }}
-                                          className="p-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/50 text-emerald-600 rounded-xl transition-all border border-emerald-100 dark:border-emerald-900/40"
+                                          className="p-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:hover:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded-xl transition-all border border-emerald-100 dark:border-emerald-900/40"
                                           title="عرض الإيصال"
                                         >
-                                          <FileText size={16} />
+                                          <FileText size={14} />
                                         </button>
                                       )}
                                     </>
                                   )}
                                 </div>
                               </td>
-                              <td className="px-6 py-4 text-center">
+                              <td className="px-6 py-4.5 text-center">
                                 <div className="flex items-center justify-center gap-2">
                                   {hasMultiple ? (
                                     <motion.button 
-                                      whileHover={{ scale: 1.05 }}
-                                      className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700/80 text-primary dark:text-slate-300 font-extrabold text-[10px] rounded-lg border border-gray-150 dark:border-slate-700"
+                                      whileHover={{ scale: 1.03 }}
+                                      whileTap={{ scale: 0.97 }}
+                                      className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700/80 text-primary dark:text-slate-300 font-bold text-[10.5px] rounded-xl border border-slate-200 dark:border-slate-700 font-cairo shadow-sm cursor-pointer"
                                     >
                                       عرض التفاصيل ({group.count})
                                     </motion.button>
                                   ) : (
                                     <>
                                       <motion.button 
-                                        whileHover={{ scale: 1.1, rotate: 5 }}
+                                        whileHover={{ scale: 1.08, rotate: 5 }}
                                         whileTap={{ scale: 0.95 }}
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           setEditingRequest(displayReq);
                                           setIsModalOpen(true);
                                         }}
-                                        className="p-2 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/30 dark:hover:bg-blue-950/50 text-blue-600 rounded-xl transition-all border border-blue-100/50 dark:border-blue-900/20"
+                                        className="p-2 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/30 dark:hover:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-xl transition-all border border-blue-100/50 dark:border-blue-900/20 cursor-pointer"
                                         title="تعديل"
                                       >
-                                        <Pencil size={15} />
+                                        <Pencil size={14} />
                                       </motion.button>
                                       <motion.button 
-                                        whileHover={{ scale: 1.1, rotate: -5 }}
+                                        whileHover={{ scale: 1.08, rotate: -5 }}
                                         whileTap={{ scale: 0.95 }}
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           setSelectedRequest(displayReq);
                                         }}
-                                        className="p-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700/85 text-slate-600 dark:text-slate-300 rounded-xl transition-all border border-gray-100 dark:border-slate-750"
+                                        className="p-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-xl transition-all border border-slate-200 dark:border-slate-700 cursor-pointer"
                                         title="طباعة"
                                       >
-                                        <Printer size={15} />
+                                        <Printer size={14} />
                                       </motion.button>
                                       <motion.button 
-                                        whileHover={{ scale: 1.1, color: "#ef4444" }}
+                                        whileHover={{ scale: 1.08 }}
+                                        whileTap={{ scale: 0.95 }}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setSelectedReceiptRequest(displayReq);
+                                        }}
+                                        className="p-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:hover:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded-xl transition-all border border-emerald-100/50 dark:border-emerald-900/20 cursor-pointer"
+                                        title="طباعة سند القبض"
+                                      >
+                                        <ReceiptIcon size={14} />
+                                      </motion.button>
+                                      <motion.button 
+                                        whileHover={{ scale: 1.08, color: "#ef4444" }}
                                         whileTap={{ scale: 0.95 }}
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           setConfirmDeleteId(displayReq.id);
                                         }}
-                                        className="p-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/30 dark:hover:bg-rose-950/50 text-rose-600 rounded-xl transition-all border border-rose-100/50 dark:border-rose-900/20"
+                                        className="p-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/30 dark:hover:bg-rose-900/30 text-rose-600 dark:text-rose-400 rounded-xl transition-all border border-rose-100/50 dark:border-rose-900/20 cursor-pointer"
                                         title="حذف"
                                       >
-                                        <Trash2 size={15} />
+                                        <Trash2 size={14} />
                                       </motion.button>
                                     </>
                                   )}
@@ -14353,7 +15002,7 @@ function AppContent() {
                         })
                       ) : (
                         <tr>
-                          <td colSpan={9} className="py-20 text-center">
+                          <td colSpan={10} className="py-20 text-center">
                             <div className="bg-slate-50 dark:bg-slate-800 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
                               <Search className="text-gray-300 dark:text-slate-600" size={32} />
                             </div>
@@ -14556,6 +15205,7 @@ function AppContent() {
         }}
         editingBooking={editingGameRoomBooking}
         onSave={saveGameRoomBooking}
+        selectedMonth={selectedMonth}
       />
 
       <CarSubscriptionModal 
@@ -14567,6 +15217,7 @@ function AppContent() {
         editingRequest={editingRequest}
         tenants={tenants}
         apartments={apartments}
+        selectedMonth={selectedMonth}
         onSave={async (data) => {
           const loadingToast = toast.loading(editingRequest ? 'جاري تحديث الاشتراك...' : 'جاري إضافة الاشتراك...');
           try {
@@ -14656,6 +15307,7 @@ function AppContent() {
         isOpen={!!selectedSubscriptionForPayments}
         onClose={() => setSelectedSubscriptionForPayments(null)}
         subscription={selectedSubscriptionForPayments}
+        onPrintReceipt={setSelectedReceiptRequest}
       />
 
       <BookingModal 
@@ -14668,6 +15320,7 @@ function AppContent() {
         defaultBuilding={activeTab !== 'dashboard' && activeTab !== 'تنظيف سيارات' && activeTab !== 'طلبات الماء' && activeTab !== 'طلبات الصيانة' ? activeTab : undefined}
         defaultService={activeTab === 'تنظيف سيارات' ? 'تنظيف سيارات' : activeTab === 'طلبات الماء' ? 'توصيل مياه' : activeTab === 'طلبات الصيانة' ? 'صيانة' : undefined}
         initialData={editingRequest}
+        selectedMonth={selectedMonth}
       />
 
       <MonthlyListModal
@@ -14694,6 +15347,11 @@ function AppContent() {
       {/* Hidden Invoice for Printing */}
       <div style={{ position: 'absolute', top: '-9999px', left: '-9999px', opacity: 0, pointerEvents: 'none' }}>
         {selectedRequest && <Invoice ref={invoiceRef} request={selectedRequest} />}
+      </div>
+
+      {/* Hidden Receipt for Printing */}
+      <div style={{ position: 'absolute', top: '-9999px', left: '-9999px', opacity: 0, pointerEvents: 'none' }}>
+        {selectedReceiptRequest && <Receipt ref={receiptRef} request={selectedReceiptRequest} />}
       </div>
 
       {/* Hidden Statement for Printing */}
@@ -14746,17 +15404,6 @@ function AppContent() {
           <BulkInvoices 
             ref={bulkInvoicesRef} 
             requests={bulkPrintRequests} 
-          />
-        )}
-      </div>
-
-      {/* Hidden Club Subscription Pledge Form for Printing */}
-      <div style={{ position: 'absolute', top: '-9999px', left: '-9999px', opacity: 0, pointerEvents: 'none' }}>
-        {selectedClubSubForPrint && (
-          <ClubSubscriptionForm
-            ref={clubSubscriptionFormRef}
-            subscription={selectedClubSubForPrint}
-            tenants={tenants}
           />
         )}
       </div>
@@ -14847,6 +15494,24 @@ function AppContent() {
         onClose={() => setIsClubSubPrintModalOpen(false)}
         subscriptions={clubSubscriptions}
         onPrint={(sub) => setSelectedClubSubForPrint(sub)}
+        onPrintReceipt={(sub) => setSelectedReceiptClubSub(sub)}
+      />
+
+      <ReceiptPrintPreviewModal 
+        isOpen={selectedReceiptClubSub !== null}
+        onClose={() => setSelectedReceiptClubSub(null)}
+        subscription={selectedReceiptClubSub}
+        onPrint={handlePrintReceiptClubSub}
+        contentRef={receiptClubSubRef}
+      />
+
+      <PledgePrintPreviewModal 
+        isOpen={selectedClubSubForPrint !== null}
+        onClose={() => setSelectedClubSubForPrint(null)}
+        subscription={selectedClubSubForPrint}
+        tenants={tenants}
+        onPrint={handlePrintClubSub}
+        contentRef={clubSubscriptionFormRef}
       />
 
       <WhatsAppAlertsModal 
