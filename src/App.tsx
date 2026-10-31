@@ -62,6 +62,7 @@ import {
   Upload,
   Camera,
   LayoutDashboard,
+  LayoutGrid,
   Package,
   Menu,
   Home,
@@ -84,6 +85,7 @@ import {
   Image as ImageIcon,
   Download,
   Eye,
+  RefreshCw,
   MessageSquare,
   Send,
   Link as LinkIcon,
@@ -112,6 +114,11 @@ import {
   RotateCcw,
   Key,
   Lock,
+  ReceiptText,
+  Copy,
+  ExternalLink,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 import { 
   format, 
@@ -139,9 +146,15 @@ import { useReactToPrint } from 'react-to-print';
 import { QRCodeSVG } from 'qrcode.react';
 import { toast, Toaster } from 'sonner';
 import { cn } from './lib/utils';
+import { CarSubscriptionsExcelSheet, INITIAL_CAR_SUBSCRIPTIONS_DATA } from './CarSubscriptionsExcelSheet';
+import { AssetsSidebar } from './AssetsSidebar';
+import { NORTH_RESIDENCE_UNITS } from './data/northResidenceData';
+import { ContractsEjarView } from './components/ContractsEjarView';
+import { MaintenanceSpeechView } from './components/MaintenanceSpeechView';
+import { PriceQuotationView, PriceQuotation } from './components/PriceQuotationView';
 
 // --- Types ---
-interface CleaningRequest {
+export interface CleaningRequest {
   id: string;
   userId: string;
   buildingName: string;
@@ -178,6 +191,10 @@ interface CleaningRequest {
     amount: number;
     paidDate?: string;    // YYYY-MM-DD
   }[];
+  packageSize?: 'كبيرة' | 'صغيرة';
+  daysText?: string;
+  startDateText?: string;
+  stopDate?: string;
 }
 
 interface InventoryItem {
@@ -236,7 +253,7 @@ interface Booking {
   createdAt: Timestamp;
 }
 
-interface Apartment {
+export interface Apartment {
   id: string;
   buildingId: string;
   buildingName: string;
@@ -247,7 +264,7 @@ interface Apartment {
   secretCode?: string;
 }
 
-interface RentPayment {
+export interface RentPayment {
   id: string;
   amount: number;
   dueDate: Timestamp;
@@ -257,7 +274,7 @@ interface RentPayment {
   createdAt: Timestamp;
 }
 
-interface Tenant {
+export interface Tenant {
   id: string;
   name: string;
   nationality: string;
@@ -284,12 +301,55 @@ const BUILDINGS = [
 ];
 
 const PROPERTY_BUILDINGS = [
-  { id: 'b1', name: 'مبنى ١', apartments: ['102', '103', '105', '106', '107', '108', '109', '110', '112', '113', '114', '115', '116', '117', '118', '119', '120', '121', '122', '123', '124', '125', '126', '127', '128', '129', '131', '132', '133', '134', '135'] },
-  { id: 'b2', name: 'مبنى ٢', apartments: ['202', '203', '206', '207', '208', '211', '213', '214', '215', '217', '218', '219', '221', '222', '224', '225', '226', '227', '231', '232', '233'] },
-  { id: 'b3', name: 'مبنى ٣', apartments: ['312', '313', '314', '315', '316', '317', '318', '321', '322', '324', '325', '326', '327'] },
-  { id: 'b4', name: 'مبنى ٤', apartments: ['401', '402', '403', '404', '405', '406', '407', '409', '410', '411', '412', '414', '415', '416', '417', '418', '419', '421', '422', '423', '424', '425', '426', '427', '431', '432', '433'] },
-  { id: 'b5', name: 'مبنى ٥', apartments: ['501', '502', '503', '504', '505', '506', '507', '509', '510', '511', '512', '513', '514', '515', '516', '517', '518', '519', '521', '522', '523', '524', '525', '526', '527'] }
+  { id: 'b1', name: 'مبنى ١', apartments: ['101', '102', '103', '104', '105', '106', '107', '108', '109', '110', '111', '112', '113', '114', '115', '116', '117', '118', '119', '120', '121', '122', '123', '124', '125', '126', '127', '128', '129', '131', '132', '133', '134', '135'] },
+  { id: 'b2', name: 'مبنى ٢', apartments: ['201', '202', '203', '204', '205', '206', '207', '208', '209', '210', '211', '212', '213', '214', '215', '216', '217', '218', '219', '220', '221', '222', '223', '224', '225', '226', '227', '231', '232', '233'] },
+  { id: 'b3', name: 'مبنى ٣', apartments: ['311', '312', '313', '314', '315', '316', '317', '318', '319', '321', '322', '323', '324', '325', '326', '327'] },
+  { id: 'b4', name: 'مبنى ٤', apartments: ['401', '402', '403', '404', '405', '406', '407', '408', '409', '410', '411', '412', '413', '414', '415', '416', '417', '418', '419', '420', '421', '422', '423', '424', '425', '426', '427', '431', '432', '433'] },
+  { id: 'b5', name: 'مبنى ٥', apartments: ['501', '502', '503', '504', '505', '506', '507', '508', '509', '510', '511', '512', '513', '514', '515', '516', '517', '518', '519', '5110', '521', '522', '523', '524', '525', '526', '527', 'شغالة يزيد', 'شغالة 327'] }
 ];
+
+export const INITIAL_SYNTHETIC_APARTMENTS: Apartment[] = NORTH_RESIDENCE_UNITS.map(u => {
+  const apt: Apartment = {
+    id: `${u.buildingId}-${u.apartmentNumber}`,
+    buildingId: u.buildingId,
+    buildingName: u.buildingName,
+    number: u.apartmentNumber,
+    status: u.status,
+    roomType: u.roomType,
+  };
+  if (u.status === 'occupied') {
+    apt.tenantId = `tenant-${u.apartmentNumber}`;
+  }
+  return apt;
+});
+
+export const INITIAL_SYNTHETIC_TENANTS: Tenant[] = NORTH_RESIDENCE_UNITS
+  .filter(u => u.status === 'occupied' && u.tenantName)
+  .map(u => {
+    const sDate = u.startDate ? new Date(u.startDate + 'T00:00:00') : new Date('2026-01-01T00:00:00');
+    const eDate = u.endDate ? new Date(u.endDate + 'T00:00:00') : new Date('2027-01-01T00:00:00');
+    const pDate = u.nextPaymentDate ? new Date(u.nextPaymentDate + 'T00:00:00') : eDate;
+
+    return {
+      id: `tenant-${u.apartmentNumber}`,
+      apartmentId: `${u.buildingId}-${u.apartmentNumber}`,
+      name: u.tenantName,
+      nationality: u.nationality || 'سعودي',
+      phone: u.phone || '',
+      company: u.company || '',
+      idNumber: u.idNumber || '',
+      internetRequest: u.internetRequest || 0,
+      duration: u.duration || 'سنة',
+      startDate: Timestamp.fromDate(sDate),
+      endDate: Timestamp.fromDate(eDate),
+      nextPaymentDate: Timestamp.fromDate(pDate),
+      contractValue: u.contractValue || 0,
+      collectedAmount: u.contractValue || 0,
+      paymentFrequency: u.duration === 'شهري' ? 'monthly' : u.duration === '6 شهور' ? 'semi-annual' : 'annual',
+      paymentMethod: 'تحويل بنكي',
+      status: 'active'
+    };
+  });
 
 const SERVICES = [
   { name: 'تنظيف عادي', price: 100 },
@@ -2671,6 +2731,391 @@ const WhatsAppMessageModal = ({
   );
 };
 
+// --- Cleaning Payment Claim & Receipt WhatsApp Modal (Bilingual Arabic + English) ---
+const CleaningClaimWhatsAppModal = ({
+  isOpen,
+  onClose,
+  claimData,
+  tenants,
+  apartments,
+  whatsappGroupLink,
+  safeToDate
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  claimData: {
+    request: CleaningRequest;
+    totalPrice?: number;
+    count?: number;
+    isPaid?: boolean;
+  } | null;
+  tenants: Tenant[];
+  apartments: Apartment[];
+  whatsappGroupLink?: string;
+  safeToDate: (d: any) => Date;
+}) => {
+  const [language, setLanguage] = useState<'bilingual' | 'ar' | 'en'>('bilingual');
+  const [recipientPhone, setRecipientPhone] = useState('');
+  const [recipientName, setRecipientName] = useState('');
+  const [customMessage, setCustomMessage] = useState('');
+  const [isCopied, setIsCopied] = useState(false);
+
+  const req = claimData?.request;
+  const isPaid = !!claimData?.isPaid;
+  const totalPrice = claimData?.totalPrice ?? (req?.price || 0);
+
+  const aptNum = req ? (req.serviceType === 'تنظيف سيارات' ? (req.apartment || req.apartmentNumber || '') : (req.apartmentNumber || '')) : '';
+  const buildingName = req?.buildingName || 'مجمع نورث ريزيدنس';
+
+  // Find apartment and tenant
+  useEffect(() => {
+    if (isOpen && req) {
+      const targetApt = apartments.find(a => 
+        (a.buildingName === req.buildingName || !req.buildingName) && 
+        a.number === aptNum
+      ) || apartments.find(a => a.number === aptNum);
+
+      const targetTenant = targetApt 
+        ? (tenants.find(t => t.id === targetApt.tenantId) || tenants.find(t => t.apartmentId === targetApt.id))
+        : (tenants.find(t => t.apartmentId === aptNum) || tenants.find(t => (t as any).apartmentNumber === aptNum));
+
+      const tName = targetTenant?.name || targetTenant?.company || '';
+      const tPhone = targetTenant?.phone || '';
+      
+      setRecipientName(tName);
+      setRecipientPhone(tPhone);
+    }
+  }, [isOpen, req, aptNum, apartments, tenants]);
+
+  // Generate template based on language and data
+  useEffect(() => {
+    if (!req) return;
+
+    const serviceDateStr = format(safeToDate(req.date), 'dd/MM/yyyy');
+    const serviceType = req.serviceType || 'تنظيف عادي';
+    const serviceTypeEn = serviceType.includes('سيار') 
+      ? 'car wash service' 
+      : serviceType.includes('شقة') 
+      ? 'apartment cleaning service' 
+      : serviceType.includes('مياه') 
+      ? 'water delivery service' 
+      : 'standard cleaning service';
+
+    let arText = '';
+    let enText = '';
+
+    if (!isPaid) {
+      // Payment Claim (مطالبة بمبلغ النظافة) - النص المعتمد بدقة
+      arText = `السلام عليكم،
+
+نذكّركم بوجود مستحقات خدمة النظافة للوحدة **${aptNum}**، بمبلغ **${totalPrice.toLocaleString('en-US')} ريال**، عن خدمة ${serviceType} بتاريخ ${serviceDateStr}.
+
+نأمل التكرم بالسداد وإرسال إشعار التحويل لتوثيق الإيصال.
+
+شاكرين لكم تعاونكم.`;
+
+      enText = `Hello,
+
+Kindly be reminded of the outstanding cleaning service payment for unit **${aptNum}**, in the amount of **${totalPrice.toLocaleString('en-US')} SAR**, for ${serviceTypeEn} on ${serviceDateStr}.
+
+Please kindly proceed with payment and share the transfer receipt to document the payment.
+
+Thank you for your cooperation.`;
+    } else {
+      // Payment Receipt Confirmation (تأكيد استلام الدفعة)
+      arText = `السلام عليكم،
+
+تم بحمد الله استلام وقيد سداد مستحقات خدمة النظافة للوحدة **${aptNum}**، بمبلغ **${totalPrice.toLocaleString('en-US')} ريال**، عن خدمة ${serviceType} بتاريخ ${serviceDateStr}.
+
+شاكرين لكم تعاونكم.`;
+
+      enText = `Hello,
+
+The cleaning service payment for unit **${aptNum}**, in the amount of **${totalPrice.toLocaleString('en-US')} SAR**, for ${serviceTypeEn} on ${serviceDateStr}, has been successfully received and recorded.
+
+Thank you for your cooperation.`;
+    }
+
+    if (language === 'ar') {
+      setCustomMessage(arText);
+    } else if (language === 'en') {
+      setCustomMessage(enText);
+    } else {
+      setCustomMessage(`${arText}\n\n━━━━━━━━━━━━━━━━━━━━\n\n${enText}`);
+    }
+  }, [req, isPaid, totalPrice, language, recipientName, aptNum, buildingName, whatsappGroupLink, safeToDate]);
+
+  if (!isOpen || !req) return null;
+
+  const handleSendWhatsApp = () => {
+    let cleanPhone = recipientPhone.replace(/\D/g, '');
+    if (cleanPhone.startsWith('05')) {
+      cleanPhone = '966' + cleanPhone.substring(1);
+    } else if (cleanPhone.startsWith('5')) {
+      cleanPhone = '966' + cleanPhone;
+    } else if (cleanPhone.startsWith('00966')) {
+      cleanPhone = cleanPhone.substring(2);
+    } else if (!cleanPhone.startsWith('966') && cleanPhone.length === 9) {
+      cleanPhone = '966' + cleanPhone;
+    }
+
+    const encoded = encodeURIComponent(customMessage);
+    if (cleanPhone) {
+      window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encoded}`, '_blank');
+    } else {
+      window.open(`https://api.whatsapp.com/send?text=${encoded}`, '_blank');
+    }
+    toast.success('تم فتح تطبيق الواتساب بنجاح');
+    onClose();
+  };
+
+  const handleCopyMessage = () => {
+    navigator.clipboard.writeText(customMessage);
+    setIsCopied(true);
+    toast.success('تم نسخ نص الرسالة إلى الحافظة!');
+    setTimeout(() => setIsCopied(false), 2000);
+  };
+
+  return (
+    <AnimatePresence>
+      <div className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-5" dir="rtl">
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={onClose}
+          className="absolute inset-0 bg-slate-950/75 backdrop-blur-sm"
+        />
+
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95, y: 15 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.95, y: 15 }}
+          className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl overflow-hidden font-cairo flex flex-col max-h-[92vh] border border-slate-200 dark:border-slate-800"
+        >
+          {/* Header */}
+          <div className="p-6 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-emerald-600 via-emerald-700 to-teal-800 text-white flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-white/15 backdrop-blur-md border border-white/20 flex items-center justify-center text-white shadow-lg">
+                <MessageCircle size={24} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-lg font-black tracking-tight">
+                    {isPaid ? 'إرسال تأكيد استلام الدفعة بالواتساب' : 'مطالبة بمبلغ النظافة عبر الواتساب'}
+                  </h3>
+                  <span className="px-2.5 py-0.5 rounded-full bg-white/20 text-white text-[10px] font-black border border-white/25">
+                    عربي + English
+                  </span>
+                </div>
+                <p className="text-xs text-emerald-100/90 font-bold mt-0.5">
+                  إشعار فوري يتضمن المبلغ وتفاصيل وتاريخ الطلب
+                </p>
+              </div>
+            </div>
+
+            <button 
+              onClick={onClose}
+              className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          {/* Modal Content */}
+          <div className="p-6 overflow-y-auto space-y-5 custom-scrollbar">
+            
+            {/* Quick Summary Strip */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-100 dark:border-slate-800">
+                <span className="text-[10px] font-black text-slate-400 block mb-0.5">الوحدة السكنية</span>
+                <b className="text-slate-900 dark:text-white text-xs font-black">
+                  شقة {aptNum}
+                </b>
+                <span className="text-[10px] text-slate-400 block truncate">{buildingName}</span>
+              </div>
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-100 dark:border-slate-800">
+                <span className="text-[10px] font-black text-slate-400 block mb-0.5">نوع الخدمة</span>
+                <b className="text-emerald-600 dark:text-emerald-400 text-xs font-black truncate block">
+                  {req.serviceType}
+                </b>
+                <span className="text-[10px] text-slate-400 block">{format(safeToDate(req.date), 'dd/MM/yyyy')}</span>
+              </div>
+
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 rounded-2xl border border-emerald-100 dark:border-emerald-900/40">
+                <span className="text-[10px] font-black text-emerald-700 dark:text-emerald-400 block mb-0.5">
+                  {isPaid ? 'المبلغ المسدد' : 'المبلغ المستحق'}
+                </span>
+                <b className="text-emerald-700 dark:text-emerald-300 text-sm font-black font-mono">
+                  {totalPrice.toLocaleString('en-US')} ر.س
+                </b>
+                <span className="text-[9px] text-emerald-600 font-bold block">{isPaid ? 'تم السداد' : 'غير مسدد'}</span>
+              </div>
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-100 dark:border-slate-800">
+                <span className="text-[10px] font-black text-slate-400 block mb-0.5">تاريخ المطالبة</span>
+                <b className="text-slate-800 dark:text-slate-200 text-xs font-mono font-bold block">
+                  {format(new Date(), 'dd/MM/yyyy')}
+                </b>
+                <span className="text-[10px] text-slate-400 block font-mono">{format(new Date(), 'hh:mm a')}</span>
+              </div>
+            </div>
+
+            {/* Recipient Phone and Name Row */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-black text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                  <Phone size={14} className="text-emerald-600" />
+                  <span>رقم جوال المستأجر (الواتساب):</span>
+                </label>
+                {recipientName && (
+                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 bg-white dark:bg-slate-800 px-2.5 py-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
+                    الساكن: {recipientName}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <input 
+                    type="text"
+                    value={recipientPhone}
+                    onChange={(e) => setRecipientPhone(e.target.value)}
+                    placeholder="مثال: 0501234567 أو 966501234567"
+                    className="w-full pl-4 pr-10 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-sm text-slate-900 dark:text-white font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    dir="ltr"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                    <Phone size={15} />
+                  </span>
+                </div>
+
+                <input 
+                  type="text"
+                  value={recipientName}
+                  onChange={(e) => setRecipientName(e.target.value)}
+                  placeholder="اسم المستأجر"
+                  className="w-44 px-3 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+            </div>
+
+            {/* Language Selector */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-black text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                <Globe size={14} className="text-emerald-600" />
+                <span>اختر لغة رسالة المطالبة:</span>
+              </label>
+
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLanguage('bilingual')}
+                  className={cn(
+                    "py-2.5 px-3 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-1.5 border cursor-pointer",
+                    language === 'bilingual'
+                      ? "bg-emerald-600 text-white border-emerald-600 shadow-sm shadow-emerald-600/30"
+                      : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50"
+                  )}
+                >
+                  <Globe size={13} />
+                  <span>عربي + English</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setLanguage('ar')}
+                  className={cn(
+                    "py-2.5 px-3 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-1.5 border cursor-pointer",
+                    language === 'ar'
+                      ? "bg-emerald-600 text-white border-emerald-600 shadow-sm shadow-emerald-600/30"
+                      : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50"
+                  )}
+                >
+                  <span>🇸🇦 العربية فقط</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setLanguage('en')}
+                  className={cn(
+                    "py-2.5 px-3 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-1.5 border cursor-pointer",
+                    language === 'en'
+                      ? "bg-emerald-600 text-white border-emerald-600 shadow-sm shadow-emerald-600/30"
+                      : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50"
+                  )}
+                >
+                  <span>🇬🇧 English Only</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Editable WhatsApp Preview Area */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-black text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                  <MessageSquare size={14} className="text-emerald-600" />
+                  <span>معاينة نص الرسالة قبل الإرسال (قابلة للتعديل):</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={handleCopyMessage}
+                  className="text-[11px] font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1 cursor-pointer"
+                >
+                  <Copy size={12} />
+                  <span>{isCopied ? 'تم النسخ ✓' : 'نسخ النص'}</span>
+                </button>
+              </div>
+
+              <div className="relative rounded-2xl overflow-hidden border border-emerald-200 dark:border-emerald-900/50 bg-[#e5ddd5]/30 dark:bg-slate-950 p-3">
+                <textarea
+                  rows={8}
+                  value={customMessage}
+                  onChange={(e) => setCustomMessage(e.target.value)}
+                  className="w-full bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800 font-sans text-xs sm:text-sm text-slate-900 dark:text-slate-100 leading-relaxed focus:outline-none focus:ring-2 focus:ring-emerald-500 custom-scrollbar resize-none shadow-xs"
+                  dir="auto"
+                />
+              </div>
+            </div>
+
+          </div>
+
+          {/* Bottom Actions */}
+          <div className="p-4 sm:p-5 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleSendWhatsApp}
+              className="flex-1 py-3 px-6 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm rounded-xl shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-98"
+            >
+              <Send size={16} />
+              <span>إرسال المطالبة عبر الواتساب الآن 🚀</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleCopyMessage}
+              className="py-3 px-4 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-1.5"
+              title="نسخ النص"
+            >
+              <Copy size={15} />
+              <span className="hidden sm:inline">نسخ النص</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="py-3 px-4 bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-300 dark:hover:bg-slate-700 rounded-xl font-bold text-xs transition-all cursor-pointer"
+            >
+              إلغاء
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    </AnimatePresence>
+  );
+};
+
 const ApartmentCodesModal = ({
   isOpen,
   onClose,
@@ -3268,7 +3713,8 @@ const ApartmentDetailsModal = ({
   onPrint,
   onPrintStatement,
   onBulkPrint,
-  onDelete
+  onDelete,
+  onClaimPayment
 } : { 
   isOpen: boolean, 
   onClose: () => void, 
@@ -3281,7 +3727,8 @@ const ApartmentDetailsModal = ({
   onPrint: (req: CleaningRequest) => void,
   onPrintStatement: (filteredRequests: CleaningRequest[]) => void,
   onBulkPrint?: (requests: CleaningRequest[]) => void,
-  onDelete: (id: string) => void
+  onDelete: (id: string) => void,
+  onClaimPayment?: (req: CleaningRequest) => void
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'requests' | 'history'>('requests');
   const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
@@ -3466,15 +3913,25 @@ const ApartmentDetailsModal = ({
                           </button>
                         </td>
                         <td className="px-4 py-4">
-                          <button 
-                            onClick={() => onUpdateStatus(req.id, 'paymentStatus', req.paymentStatus === 'paid' ? 'unpaid' : 'paid')}
-                            className={cn(
-                              "px-3 py-1 rounded-full text-[10px] font-bold",
-                              req.paymentStatus === 'paid' ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"
-                            )}
-                          >
-                            {req.paymentStatus === 'paid' ? 'مدفوع' : 'لم يدفع'}
-                          </button>
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button 
+                              onClick={() => onUpdateStatus(req.id, 'paymentStatus', req.paymentStatus === 'paid' ? 'unpaid' : 'paid')}
+                              className={cn(
+                                "px-3 py-1 rounded-full text-[10px] font-bold cursor-pointer transition-all",
+                                req.paymentStatus === 'paid' ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" : "bg-rose-100 text-rose-700 hover:bg-rose-200"
+                              )}
+                            >
+                              {req.paymentStatus === 'paid' ? 'مدفوع' : 'لم يدفع'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onClaimPayment?.(req)}
+                              className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 dark:bg-emerald-950/30 dark:hover:bg-emerald-900/30 dark:text-emerald-400 rounded-lg transition-all border border-emerald-200/40 dark:border-emerald-800/20 cursor-pointer"
+                              title="مطالبة بمبلغ النظافة وتاريخ الرسالة بالواتساب (عربي + إنجليزي)"
+                            >
+                              <MessageCircle size={14} />
+                            </button>
+                          </div>
                         </td>
                         <td className="px-4 py-4">
                           <div className="flex items-center justify-center gap-1">
@@ -6375,12 +6832,13 @@ const BrandingModal = ({
   };
 
   const THEME_COLORS = [
-    { id: 'emerald', label: 'زمردي', class: 'bg-[#10B981]' },
-    { id: 'indigo', label: 'بنفسجي', class: 'bg-[#8B5CF6]' },
-    { id: 'blue', label: 'أزرق', class: 'bg-[#3B82F6]' },
-    { id: 'rose', label: 'وردي', class: 'bg-[#EC4899]' },
-    { id: 'amber', label: 'كهرماني', class: 'bg-[#F59E0B]' },
-    { id: 'slate', label: 'رمادي', class: 'bg-[#334155]' },
+    { id: 'pastel', label: 'باستيل هادئ', class: 'bg-gradient-to-r from-pink-300 via-rose-100 to-emerald-200', hex: '#0f766e' },
+    { id: 'emerald', label: 'زمردي', class: 'bg-[#10B981]', hex: '#10B981' },
+    { id: 'indigo', label: 'بنفسجي', class: 'bg-[#8B5CF6]', hex: '#8B5CF6' },
+    { id: 'blue', label: 'أزرق', class: 'bg-[#3B82F6]', hex: '#3B82F6' },
+    { id: 'rose', label: 'وردي', class: 'bg-[#EC4899]', hex: '#EC4899' },
+    { id: 'amber', label: 'كهرماني', class: 'bg-[#F59E0B]', hex: '#F59E0B' },
+    { id: 'slate', label: 'رمادي', class: 'bg-[#334155]', hex: '#334155' },
   ];
 
   if (!isOpen) return null;
@@ -6490,10 +6948,21 @@ const BrandingModal = ({
                       رفع خلفية جديدة
                       <input type="file" accept="image/*" className="hidden" onChange={e => handleImageUpload(e, 'background')} />
                     </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBackground('/assets/aistudio/image_d8eaf4e5.png');
+                        setOpacity(30);
+                      }}
+                      className="w-full py-2.5 px-3 bg-gradient-to-r from-pink-50 via-white to-emerald-50 hover:from-pink-100 hover:to-emerald-100 text-slate-800 border border-pink-200/60 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                    >
+                      <Sparkles size={14} className="text-pink-500" />
+                      <span>تطبيق ألوان الباستيل الفاتحة (الصورة المرفقة)</span>
+                    </button>
                     {background && (
                       <button 
                         onClick={() => setBackground(null)}
-                        className="w-full py-2 text-rose-500 font-bold text-[10px] hover:underline"
+                        className="w-full py-1.5 text-rose-500 font-bold text-[10px] hover:underline"
                       >
                         حذف الخلفية
                       </button>
@@ -6504,21 +6973,21 @@ const BrandingModal = ({
 
               <div>
                 <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-3">نمط الألوان</label>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   {THEME_COLORS.map(t => (
                     <button
                       key={t.id}
                       onClick={() => setColor(t.id)}
                       className={cn(
-                        "flex items-center gap-2 p-3 rounded-2xl border-2 transition-all",
+                        "flex items-center gap-2 p-3 rounded-2xl border-2 transition-all cursor-pointer",
                         color === t.id 
                           ? `border-current bg-current/10` 
                           : "border-transparent bg-gray-50 dark:bg-slate-800 hover:bg-gray-100 dark:hover:bg-slate-700"
                       )}
-                      style={color === t.id ? { borderColor: t.class.match(/\[(.*)\]/)?.[1], backgroundColor: `${t.class.match(/\[(.*)\]/)?.[1]}1A`, color: t.class.match(/\[(.*)\]/)?.[1] } : {}}
+                      style={color === t.id ? { borderColor: t.hex, backgroundColor: `${t.hex}18`, color: t.hex } : {}}
                     >
-                      <div className={cn("w-4 h-4 rounded-full", t.class)} />
-                      <span className="text-xs font-bold text-gray-900 dark:text-white">{t.label}</span>
+                      <div className={cn("w-4 h-4 rounded-full shadow-xs shrink-0", t.class)} />
+                      <span className="text-xs font-bold text-gray-900 dark:text-white truncate">{t.label}</span>
                     </button>
                   ))}
                 </div>
@@ -6554,6 +7023,720 @@ const BrandingModal = ({
   );
 };
 
+// --- Arabic Numbers to Words Helper ---
+function tafqeetArabic(num: number): string {
+  const rounded = Math.round(num);
+  if (rounded === 0) return 'صفر ريال سعودي';
+  const units = ['', 'واحد', 'اثنان', 'ثلاثة', 'أربعة', 'خمسة', 'ستة', 'سبعة', 'ثمانية', 'تسعة', 'عشرة', 'أحد عشر', 'اثنا عشر', 'ثلاثة عشر', 'أربعة عشر', 'خمسة عشر', 'ستة عشر', 'سبعة عشر', 'ثمانية عشر', 'تسعة عشر'];
+  const tens = ['', '', 'عشرون', 'ثلاثون', 'أربعون', 'خمسون', 'ستون', 'سبعون', 'ثمانون', 'تسعون'];
+  const hundreds = ['', 'مائة', 'مائتان', 'ثلاثمائة', 'أربعمائة', 'خمسمائة', 'ستمائة', 'سبعمائة', 'ثمانمائة', 'تسعمائة'];
+  
+  if (rounded < 20) return `${units[rounded]} ريال سعودي`;
+  if (rounded < 100) {
+    const u = rounded % 10;
+    const t = Math.floor(rounded / 10);
+    return `${u > 0 ? units[u] + ' و' : ''}${tens[t]} ريال سعودي`;
+  }
+  if (rounded < 1000) {
+    const h = Math.floor(rounded / 100);
+    const rem = rounded % 100;
+    if (rem === 0) return `${hundreds[h]} ريال سعودي`;
+    if (rem < 20) return `${hundreds[h]} و${units[rem]} ريال سعودي`;
+    const u = rem % 10;
+    const t = Math.floor(rem / 10);
+    return `${hundreds[h]} و${u > 0 ? units[u] + ' و' : ''}${tens[t]} ريال سعودي`;
+  }
+  if (rounded < 1000000) {
+    const th = Math.floor(rounded / 1000);
+    const rem = rounded % 1000;
+    const thText = th === 1 ? 'ألف' : th === 2 ? 'ألفان' : th >= 3 && th <= 10 ? `${units[th]} آلاف` : `${tafqeetArabic(th).replace(' ريال سعودي', '')} ألف`;
+    if (rem === 0) return `${thText} ريال سعودي`;
+    return `${thText} و${tafqeetArabic(rem).replace(' ريال سعودي', '')} ريال سعودي`;
+  }
+  return `${rounded} ريال سعودي`;
+}
+
+// --- North Cleaning Official Paper Claim and Receipt Modal ---
+const NorthCleaningClaimReceiptModal = ({
+  isOpen,
+  onClose,
+  requests,
+  apartments,
+  tenants,
+  whatsappGroupLink,
+  onUpdatePaymentStatus,
+  onPrintReceipt,
+  initialApartmentNumber
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  requests: CleaningRequest[];
+  apartments: Apartment[];
+  tenants: Tenant[];
+  whatsappGroupLink: string;
+  onUpdatePaymentStatus: (id: string, status: 'paid' | 'unpaid') => Promise<void>;
+  onPrintReceipt: (req: CleaningRequest) => void;
+  initialApartmentNumber?: string;
+}) => {
+  const [selectedAptNumber, setSelectedAptNumber] = useState<string>(initialApartmentNumber || '');
+  const [mode, setMode] = useState<'receipt' | 'claim'>('receipt');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  const paperPrintRef = React.useRef<HTMLDivElement>(null);
+
+  // Filter requests for 'نظافة نورث'
+  const northRequests = React.useMemo(() => {
+    return requests.filter(r => r.buildingName === 'نظافة نورث');
+  }, [requests]);
+
+  const getReqAptNumber = (req: CleaningRequest) => {
+    if (req.serviceType === 'تنظيف سيارات') {
+      return req.apartment || req.apartmentNumber || '';
+    }
+    return req.apartmentNumber || '';
+  };
+
+  // Compile apartments list and stats for 'نظافة نورث'
+  const northApartmentList = React.useMemo(() => {
+    const map = new Map<string, {
+      apartmentNumber: string;
+      requests: CleaningRequest[];
+      unpaidCount: number;
+      unpaidTotal: number;
+      paidCount: number;
+      paidTotal: number;
+      totalCount: number;
+      totalAmount: number;
+      tenant: Tenant | null;
+    }>();
+
+    northRequests.forEach(req => {
+      const aptNum = getReqAptNumber(req).trim();
+      if (!aptNum) return;
+      if (!map.has(aptNum)) {
+        map.set(aptNum, {
+          apartmentNumber: aptNum,
+          requests: [],
+          unpaidCount: 0,
+          unpaidTotal: 0,
+          paidCount: 0,
+          paidTotal: 0,
+          totalCount: 0,
+          totalAmount: 0,
+          tenant: null
+        });
+      }
+      const item = map.get(aptNum)!;
+      item.requests.push(req);
+      item.totalCount += 1;
+      const priceNum = Number(req.price) || 0;
+      item.totalAmount += priceNum;
+      if (req.paymentStatus === 'unpaid') {
+        item.unpaidCount += 1;
+        item.unpaidTotal += priceNum;
+      } else {
+        item.paidCount += 1;
+        item.paidTotal += priceNum;
+      }
+    });
+
+    // Also include registered apartments in 'نظافة نورث'
+    apartments.filter(a => a.buildingName === 'نظافة نورث').forEach(apt => {
+      const aptNum = apt.number.trim();
+      if (!map.has(aptNum)) {
+        map.set(aptNum, {
+          apartmentNumber: aptNum,
+          requests: [],
+          unpaidCount: 0,
+          unpaidTotal: 0,
+          paidCount: 0,
+          paidTotal: 0,
+          totalCount: 0,
+          totalAmount: 0,
+          tenant: null
+        });
+      }
+    });
+
+    // Match tenants
+    Array.from(map.values()).forEach(item => {
+      const aptObj = apartments.find(a => a.number === item.apartmentNumber && (a.buildingName === 'نظافة نورث' || !a.buildingName));
+      if (aptObj && aptObj.tenantId) {
+        item.tenant = tenants.find(t => t.id === aptObj.tenantId) || null;
+      }
+      if (!item.tenant) {
+        item.tenant = tenants.find(t => t.apartmentId === item.apartmentNumber) || null;
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.unpaidTotal > 0 && b.unpaidTotal === 0) return -1;
+      if (b.unpaidTotal > 0 && a.unpaidTotal === 0) return 1;
+      const numA = parseInt(a.apartmentNumber.replace(/\D/g, ''), 10);
+      const numB = parseInt(b.apartmentNumber.replace(/\D/g, ''), 10);
+      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+      return a.apartmentNumber.localeCompare(b.apartmentNumber, 'ar');
+    });
+  }, [northRequests, apartments, tenants]);
+
+  // Set initial selected apartment
+  useEffect(() => {
+    if (isOpen) {
+      if (initialApartmentNumber) {
+        setSelectedAptNumber(initialApartmentNumber);
+      } else if (northApartmentList.length > 0 && (!selectedAptNumber || !northApartmentList.some(a => a.apartmentNumber === selectedAptNumber))) {
+        const firstUnpaid = northApartmentList.find(a => a.unpaidTotal > 0);
+        setSelectedAptNumber(firstUnpaid ? firstUnpaid.apartmentNumber : northApartmentList[0].apartmentNumber);
+      }
+    }
+  }, [isOpen, initialApartmentNumber, northApartmentList]);
+
+  const currentAptData = React.useMemo(() => {
+    return northApartmentList.find(a => a.apartmentNumber === selectedAptNumber) || null;
+  }, [northApartmentList, selectedAptNumber]);
+
+  // Automatically select mode based on whether apartment has unpaid balance
+  useEffect(() => {
+    if (currentAptData) {
+      if (currentAptData.unpaidTotal > 0 && currentAptData.paidTotal === 0) {
+        setMode('claim');
+      } else if (currentAptData.paidTotal > 0 && currentAptData.unpaidTotal === 0) {
+        setMode('receipt');
+      }
+    }
+  }, [selectedAptNumber, currentAptData]);
+
+  if (!isOpen) return null;
+
+  // Requests shown on paper
+  const displayedRequests = currentAptData ? (
+    mode === 'claim'
+      ? (currentAptData.requests.filter(r => r.paymentStatus === 'unpaid').length > 0
+          ? currentAptData.requests.filter(r => r.paymentStatus === 'unpaid')
+          : currentAptData.requests)
+      : (currentAptData.requests.filter(r => r.paymentStatus === 'paid').length > 0
+          ? currentAptData.requests.filter(r => r.paymentStatus === 'paid')
+          : currentAptData.requests)
+  ) : [];
+
+  const totalPaperAmount = displayedRequests.reduce((sum, r) => sum + (Number(r.price) || 0), 0) || (
+    mode === 'claim' ? (currentAptData?.unpaidTotal || 0) : (currentAptData?.paidTotal || 0)
+  );
+
+  const documentNumber = `${mode === 'receipt' ? 'REC' : 'CLM'}-N${selectedAptNumber || '00'}-${format(new Date(), 'yyyyMMdd')}`;
+  const currentDateStr = format(new Date(), 'yyyy/MM/dd');
+  const currentTimeStr = format(new Date(), 'hh:mm a');
+  const tenantName = currentAptData?.tenant?.name || 'ساكن الشقة المحترم';
+  const tenantPhone = currentAptData?.tenant?.phone || '';
+
+  // Direct Print Function for the Paper
+  const handlePrintPaper = () => {
+    const printEl = document.getElementById('north-receipt-paper-printable');
+    if (!printEl) {
+      window.print();
+      return;
+    }
+    const printWin = window.open('', '', 'width=900,height=1000');
+    if (!printWin) {
+      window.print();
+      return;
+    }
+    printWin.document.write(`
+      <!DOCTYPE html>
+      <html dir="rtl" lang="ar">
+        <head>
+          <title>${mode === 'receipt' ? 'إيصال وسند قبض' : 'فاتورة مطالبة مالية'} - شقة ${selectedAptNumber} - نظافة نورث</title>
+          <meta charset="utf-8" />
+          <link rel="preconnect" href="https://fonts.googleapis.com">
+          <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+          <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+          <script src="https://cdn.tailwindcss.com"></script>
+          <style>
+            @media print {
+              @page { size: A4 portrait; margin: 8mm; }
+              body { background: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              .no-print { display: none !important; }
+            }
+            body { font-family: 'Cairo', sans-serif; background: #fff; color: #1e293b; }
+          </style>
+        </head>
+        <body class="bg-white p-6">
+          ${printEl.innerHTML}
+          <script>
+            setTimeout(() => {
+              window.focus();
+              window.print();
+              window.close();
+            }, 350);
+          </script>
+        </body>
+      </html>
+    `);
+    printWin.document.close();
+  };
+
+  // Direct WhatsApp sender
+  const handleSendWhatsApp = () => {
+    let cleanPhone = tenantPhone.trim().replace(/[\s\-\(\)\+]/g, '');
+    if (cleanPhone.startsWith('00')) cleanPhone = cleanPhone.substring(2);
+    if (cleanPhone.startsWith('0')) {
+      cleanPhone = '966' + cleanPhone.substring(1);
+    } else if (!cleanPhone.startsWith('966') && !cleanPhone.startsWith('+') && cleanPhone.length === 9) {
+      cleanPhone = '966' + cleanPhone;
+    }
+
+    let msg = `السلام عليكم ورحمة الله وبركاته 🌸\n\n`;
+    if (mode === 'receipt') {
+      msg += `*🧾 إيصال وسند قبض رسمي - نظافة نورث* ✅\n\n`;
+      msg += `• *رقم السند:* ${documentNumber}\n`;
+      msg += `• *التاريخ:* ${currentDateStr} (${currentTimeStr})\n`;
+      msg += `• *الشقة:* شقة رقم (${selectedAptNumber}) - نظافة نورث\n`;
+      msg += `• *المستلم منه:* ${tenantName}\n`;
+      msg += `• *المبلغ المستلم:* *${totalPaperAmount} ريال سعودي*\n`;
+      msg += `• *المبلغ كتابةً:* ${tafqeetArabic(totalPaperAmount)}\n`;
+      msg += `• *حالة السداد:* ✅ تم استلام وقيد المبلغ بالكامل\n\n`;
+      if (displayedRequests.length > 0) {
+        msg += `📋 *الخدمات المسددة:*\n`;
+        displayedRequests.forEach((req, idx) => {
+          msg += `${idx + 1}. ${req.serviceType || 'نظافة'} (${format(safeToDate(req.date), 'yyyy/MM/dd')}): *${req.price} ر.س*\n`;
+        });
+      }
+      if (whatsappGroupLink) {
+        msg += `\n🔗 *مجموعة المتابعة والدعم:* ${whatsappGroupLink}\n`;
+      }
+      msg += `\nشكراً لثقتكم بنا،\n*إدارة نورث ريزيدنس (North Residence)* 🏢`;
+    } else {
+      msg += `*📄 إشعار مطالبة مالية برسوم النظافة - نظافة نورث* 🏢\n\n`;
+      msg += `عزيزي المستأجر / *${tenantName}*،\n`;
+      msg += `نحيطكم علماً بصدور مطالبة مالية لرسوم النظافة المسجلة على *شقة (${selectedAptNumber})*:\n\n`;
+      msg += `• *رقم المطالبة:* ${documentNumber}\n`;
+      msg += `• *المبلغ المستحق:* *${totalPaperAmount} ريال سعودي*\n`;
+      msg += `• *المبلغ كتابةً:* ${tafqeetArabic(totalPaperAmount)}\n\n`;
+      if (displayedRequests.length > 0) {
+        msg += `📋 *تفاصيل الطلبات:*\n`;
+        displayedRequests.forEach((req, idx) => {
+          msg += `${idx + 1}. ${req.serviceType || 'نظافة'} (${format(safeToDate(req.date), 'yyyy/MM/dd')}): *${req.price} ر.س*\n`;
+        });
+      }
+      msg += `\n💳 يرجى التكرم بالسداد والتحويل ومشاركتنا الإشعار لاعتماد وقيد الإيصال في النظام.\n`;
+      if (whatsappGroupLink) {
+        msg += `🔗 *رابط مجموعة التحصيل والمتابعة:* ${whatsappGroupLink}\n`;
+      }
+      msg += `\nشاكرين ومقدرين تعاونكم،\n*إدارة نورث ريزيدنس (North Residence)* ✨`;
+    }
+
+    const encoded = encodeURIComponent(msg);
+    if (cleanPhone) {
+      window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encoded}`, '_blank');
+    } else {
+      window.open(`https://api.whatsapp.com/send?text=${encoded}`, '_blank');
+    }
+    toast.success('تم فتح الواتساب لمشاركة الإيصال');
+  };
+
+  // Mark unpaid requests as paid
+  const handleMarkAsPaid = async () => {
+    if (!currentAptData || currentAptData.requests.length === 0) return;
+    setIsUpdatingStatus(true);
+    try {
+      const unpaids = currentAptData.requests.filter(r => r.paymentStatus === 'unpaid');
+      for (const req of unpaids) {
+        await onUpdatePaymentStatus(req.id, 'paid');
+      }
+      toast.success(`تم قيد سداد جميع طلبات شقة ${selectedAptNumber} بنجاح`);
+      setMode('receipt');
+    } catch (e) {
+      toast.error('حدث خطأ أثناء تحديث حالة السداد');
+    } finally {
+      setIsUpdatingStatus(false);
+    }
+  };
+
+  const filteredAptList = northApartmentList.filter(a => 
+    a.apartmentNumber.toLowerCase().includes(searchQuery.trim().toLowerCase()) ||
+    (a.tenant && a.tenant.name.toLowerCase().includes(searchQuery.trim().toLowerCase()))
+  );
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center p-2 sm:p-4 md:p-6">
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+        className="absolute inset-0 bg-slate-950/70 backdrop-blur-md"
+      />
+      
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.96, y: 15 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 15 }}
+        className="relative w-full max-w-5xl bg-slate-900 rounded-[2.5rem] shadow-2xl overflow-hidden font-cairo flex flex-col max-h-[95vh] border border-slate-700/60"
+      >
+        {/* Top Control Bar */}
+        <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-900/90 flex flex-wrap items-center justify-between gap-3 shrink-0">
+          
+          {/* Right: Apartment Selector & Building Tag */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="w-9 h-9 rounded-xl bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 flex items-center justify-center font-black">
+                <ReceiptText size={18} />
+              </span>
+              <div>
+                <h3 className="text-sm sm:text-base font-black text-white flex items-center gap-2">
+                  <span>إيصال ورقي / مطالبة نظافة نورث</span>
+                  <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-lg text-[10px] font-black">
+                    نظافة نورث
+                  </span>
+                </h3>
+              </div>
+            </div>
+
+            {/* Apartment Selector Dropdown */}
+            <div className="flex items-center gap-1.5 bg-slate-800/80 p-1 rounded-xl border border-slate-700">
+              <label className="text-[11px] font-bold text-slate-300 pr-2 flex items-center gap-1">
+                <Home size={12} className="text-emerald-400" />
+                <span>الشقة:</span>
+              </label>
+              <select
+                value={selectedAptNumber}
+                onChange={(e) => setSelectedAptNumber(e.target.value)}
+                className="bg-slate-900 text-emerald-300 font-black text-xs px-3 py-1.5 rounded-lg border border-slate-700 focus:outline-none focus:border-emerald-500 cursor-pointer"
+              >
+                {northApartmentList.map(apt => (
+                  <option key={apt.apartmentNumber} value={apt.apartmentNumber}>
+                    شقة {apt.apartmentNumber} {apt.unpaidTotal > 0 ? `(مستحق: ${apt.unpaidTotal} ر.س)` : `(${apt.requests.length} طلبات)`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Center: Mode Switcher (Receipt vs Claim) */}
+          <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-xl border border-slate-700">
+            <button
+              type="button"
+              onClick={() => setMode('receipt')}
+              className={cn(
+                "px-3.5 py-1.5 rounded-lg font-black text-xs flex items-center gap-1.5 transition-all cursor-pointer",
+                mode === 'receipt' 
+                  ? "bg-emerald-600 text-white shadow-sm" 
+                  : "text-slate-400 hover:text-slate-200"
+              )}
+            >
+              <CheckCircle2 size={14} />
+              <span>ورقة سند قبض (إيصال سداد)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('claim')}
+              className={cn(
+                "px-3.5 py-1.5 rounded-lg font-black text-xs flex items-center gap-1.5 transition-all cursor-pointer",
+                mode === 'claim' 
+                  ? "bg-rose-600 text-white shadow-sm" 
+                  : "text-slate-400 hover:text-slate-200"
+              )}
+            >
+              <FileText size={14} />
+              <span>ورقة مطالبة مالية (فاتورة)</span>
+            </button>
+          </div>
+
+          {/* Left: Action Buttons */}
+          <div className="flex items-center gap-2">
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              type="button"
+              onClick={handlePrintPaper}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-600/30 transition-all cursor-pointer"
+            >
+              <Printer size={16} />
+              <span>طباعة الورقة</span>
+            </motion.button>
+
+            <button
+              type="button"
+              onClick={handleSendWhatsApp}
+              className="px-3.5 py-2 bg-emerald-950 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-700/60 rounded-xl font-black text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+              title="إرسال التفاصيل بالواتساب"
+            >
+              <MessageCircle size={15} />
+              <span className="hidden sm:inline">واتساب</span>
+            </button>
+
+            {mode === 'claim' && currentAptData && currentAptData.unpaidTotal > 0 && (
+              <button
+                type="button"
+                disabled={isUpdatingStatus}
+                onClick={handleMarkAsPaid}
+                className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-black text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+                title="تحديث كمدفوع"
+              >
+                <CheckCircle size={14} />
+                <span className="hidden md:inline">{isUpdatingStatus ? 'جارِ...' : 'قيد السداد'}</span>
+              </button>
+            )}
+
+            <button 
+              onClick={onClose} 
+              className="p-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl transition-all cursor-pointer"
+            >
+              <X size={20} />
+            </button>
+          </div>
+        </div>
+
+        {/* Paper Document Body Container */}
+        <div className="p-4 sm:p-6 md:p-8 overflow-y-auto custom-scrollbar flex-1 bg-slate-950/60 flex justify-center items-start">
+          
+          {/* THE OFFICIAL PRINTABLE PAPER SHEET */}
+          <div 
+            id="north-receipt-paper-printable"
+            ref={paperPrintRef}
+            className="w-full max-w-[820px] bg-white text-slate-900 rounded-2xl shadow-2xl p-6 sm:p-8 md:p-10 border-4 border-double border-slate-800 relative font-cairo dir-rtl"
+            dir="rtl"
+            style={{ minHeight: '620px' }}
+          >
+            {/* Background Watermark */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-[0.03] select-none">
+              <span className="text-8xl font-black rotate-[-25deg] tracking-widest text-slate-900">
+                NORTH RESIDENCE
+              </span>
+            </div>
+
+            {/* Official Header */}
+            <div className="border-b-2 border-slate-800 pb-5 mb-6">
+              <div className="flex items-start justify-between gap-4">
+                
+                {/* Right: Organization Details */}
+                <div className="text-right space-y-1">
+                  <p className="text-[11px] font-bold text-slate-500">المملكة العربية السعودية</p>
+                  <h1 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight">
+                    مجموعة نورث ريزيدنس العقارية
+                  </h1>
+                  <p className="text-xs font-bold text-emerald-800">
+                    قسم إدارة النظافة والتشغيل السكني (نظافة نورث)
+                  </p>
+                  <p className="text-[10px] text-slate-400 font-mono">
+                    North Residence Real Estate & Facility Management
+                  </p>
+                </div>
+
+                {/* Center: Official Seal / Emblem */}
+                <div className="hidden sm:flex flex-col items-center justify-center text-center px-4">
+                  <div className="w-16 h-16 rounded-2xl bg-emerald-700 text-white flex items-center justify-center shadow-md border-2 border-emerald-900 mb-1">
+                    <Building2 size={32} />
+                  </div>
+                  <span className="text-[10px] font-black text-slate-700 tracking-wider">نظافة نورث</span>
+                </div>
+
+                {/* Left: Document Metadata & QR Code */}
+                <div className="flex items-center gap-3 text-left">
+                  <div className="text-left font-mono text-[11px] space-y-1 text-slate-600">
+                    <p><span className="font-bold text-slate-800">رقم المستند:</span> {documentNumber}</p>
+                    <p><span className="font-bold text-slate-800">التاريخ:</span> {currentDateStr}</p>
+                    <p><span className="font-bold text-slate-800">الوقت:</span> {currentTimeStr}</p>
+                    <p><span className="font-bold text-slate-800">المبنى:</span> نظافة نورث</p>
+                  </div>
+                  <div className="p-1 bg-white border border-slate-300 rounded-lg shrink-0">
+                    <QRCodeSVG value={`${window.location.origin}/receipt/${documentNumber}`} size={56} />
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            {/* Document Title Banner */}
+            <div className="my-5 text-center">
+              <div className={cn(
+                "inline-block px-8 py-2.5 rounded-xl border-2 font-black text-base sm:text-lg tracking-wide shadow-xs",
+                mode === 'receipt' 
+                  ? "bg-emerald-50 border-emerald-700 text-emerald-900" 
+                  : "bg-rose-50 border-rose-700 text-rose-900"
+              )}>
+                {mode === 'receipt' ? 'ســـنـــد قـــبـــض واســـتـــلام رســـمـــي' : 'فـــاتـــورة مـــطـــالـــبـــة مـــالـــيـــة بـــرســـوم الـــنـــظـــافـــة'}
+              </div>
+            </div>
+
+            {/* Main Details Grid */}
+            <div className="bg-slate-50/90 rounded-2xl p-5 border border-slate-200 mb-6 space-y-3.5 text-xs sm:text-sm">
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-500 font-bold min-w-[90px]">
+                    {mode === 'receipt' ? 'استلمنا من المكرم:' : 'المطلوب من المكرم:'}
+                  </span>
+                  <span className="font-black text-slate-900 border-b-2 border-slate-300 pb-0.5 flex-1">
+                    {tenantName}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-500 font-bold min-w-[70px]">رقم الشقة:</span>
+                  <span className="font-black text-emerald-800 border-b-2 border-slate-300 pb-0.5 flex-1 font-mono text-sm sm:text-base">
+                    شقة رقم ( {selectedAptNumber || '-'} ) - نظافة نورث
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-500 font-bold min-w-[90px]">رقم الجوال:</span>
+                  <span className="font-bold text-slate-800 border-b-2 border-slate-300 pb-0.5 flex-1 font-mono" dir="ltr">
+                    {tenantPhone || 'غير مسجل'}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-500 font-bold min-w-[70px]">حالة السند:</span>
+                  <span className={cn(
+                    "font-black px-3 py-0.5 rounded-md text-xs",
+                    mode === 'receipt' ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+                  )}>
+                    {mode === 'receipt' ? '✅ تم استلام المبلغ وقيده رسمياً' : '⚠️ مستحق السداد ومطلوب التحويل'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Amount In Digits & Arabic Words */}
+              <div className="pt-2 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+                <div className="sm:col-span-4 bg-slate-900 text-white p-3 rounded-xl flex items-center justify-between border-2 border-slate-800 shadow-sm">
+                  <span className="font-bold text-xs text-slate-300">
+                    {mode === 'receipt' ? 'المبلغ المستلم:' : 'إجمالي المطالبة:'}
+                  </span>
+                  <span className="font-black text-lg sm:text-xl font-mono text-emerald-400">
+                    {totalPaperAmount} ر.س
+                  </span>
+                </div>
+
+                <div className="sm:col-span-8 flex items-center gap-2">
+                  <span className="text-slate-500 font-bold shrink-0">مبلغاً وقدره:</span>
+                  <span className="font-black text-slate-900 bg-white p-2.5 rounded-xl border border-slate-300 flex-1 text-xs sm:text-sm text-emerald-900">
+                    {tafqeetArabic(totalPaperAmount)} فقط لا غير.
+                  </span>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Services Table */}
+            <div className="mb-6">
+              <h4 className="text-xs font-black text-slate-700 mb-2 flex items-center gap-1.5">
+                <span>📋 تفاصيل وبنود خدمات النظافة المسجلة:</span>
+              </h4>
+              <div className="overflow-x-auto border border-slate-300 rounded-xl">
+                <table className="w-full text-right text-xs">
+                  <thead className="bg-slate-100 text-slate-700 border-b border-slate-300 font-black">
+                    <tr>
+                      <th className="p-2.5 text-center w-10">#</th>
+                      <th className="p-2.5">نوع الخدمة</th>
+                      <th className="p-2.5">تاريخ الخدمة</th>
+                      <th className="p-2.5">الموقع / الشقة</th>
+                      <th className="p-2.5 text-center">حالة السداد</th>
+                      <th className="p-2.5 text-left font-mono">المبلغ (ر.س)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {displayedRequests.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="p-4 text-center text-slate-400 font-bold">
+                          لا توجد طلبات مسجلة لهذه الشقة
+                        </td>
+                      </tr>
+                    ) : (
+                      displayedRequests.map((req, idx) => (
+                        <tr key={req.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="p-2.5 text-center font-bold text-slate-400">{idx + 1}</td>
+                          <td className="p-2.5 font-black text-slate-800">{req.serviceType || 'خدمة النظافة'}</td>
+                          <td className="p-2.5 font-bold text-slate-600 font-mono">
+                            {format(safeToDate(req.date), 'yyyy/MM/dd')}
+                          </td>
+                          <td className="p-2.5 text-slate-600">شقة {selectedAptNumber} - نظافة نورث</td>
+                          <td className="p-2.5 text-center">
+                            <span className={cn(
+                              "px-2 py-0.5 rounded text-[10px] font-black",
+                              req.paymentStatus === 'paid' ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+                            )}>
+                              {req.paymentStatus === 'paid' ? 'مدفوع' : 'غير مدفوع'}
+                            </span>
+                          </td>
+                          <td className="p-2.5 text-left font-black font-mono text-slate-900">{req.price} ر.س</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                  <tfoot className="bg-slate-100/80 font-black border-t-2 border-slate-300">
+                    <tr>
+                      <td colSpan={5} className="p-3 text-right text-slate-800 font-black text-xs sm:text-sm">
+                        الإجمالي الكلي النهائي
+                      </td>
+                      <td className="p-3 text-left font-black text-sm sm:text-base font-mono text-emerald-800">
+                        {totalPaperAmount} ريال
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            {/* Official Notes & Instructions */}
+            <div className="p-3.5 bg-slate-50 rounded-xl border border-dashed border-slate-300 mb-8 text-[11px] text-slate-600 space-y-1">
+              <p className="font-bold text-slate-800">📌 ملاحظات وتعليمات هامة:</p>
+              <p>• يعتبر هذا المستند إشعاراً رسمياً معتمداً من إدارة تشغيل النظافة بمجموعة نورث ريزيدنس.</p>
+              {mode === 'claim' ? (
+                <p className="text-rose-700 font-bold">• يرجى التكرم بسداد المبلغ الموضح أعلاه عبر التحويل البنكي أو السداد المعتمد وإرسال الإشعار لتسوية الحساب.</p>
+              ) : (
+                <p className="text-emerald-700 font-bold">• تم قيد واستلام المبلغ الموضح أعلاه وإيداعه في السجل المالي للنظام.</p>
+              )}
+              {whatsappGroupLink && (
+                <p className="text-slate-500">• رابط مجموعة المتابعة والدعم الفني: <span className="font-mono text-emerald-700">{whatsappGroupLink}</span></p>
+              )}
+            </div>
+
+            {/* Signatures & Official Seal */}
+            <div className="pt-6 border-t-2 border-slate-800 grid grid-cols-3 gap-4 text-center text-xs">
+              
+              {/* Receiver Signature */}
+              <div className="space-y-6">
+                <p className="font-bold text-slate-700">توقيع المحصل / الإدارة</p>
+                <div className="border-b-2 border-dashed border-slate-400 w-28 mx-auto pt-4"></div>
+                <p className="text-[10px] text-slate-400 font-mono">NORTH RESIDENCE</p>
+              </div>
+
+              {/* Official Stamp in Center */}
+              <div className="flex flex-col items-center justify-center">
+                <div className="w-24 h-24 rounded-full border-4 border-double border-emerald-700 text-emerald-800 flex flex-col items-center justify-center p-2 text-center rotate-[-8deg] shadow-xs select-none bg-emerald-50/40">
+                  <span className="text-[8px] font-black tracking-widest">إدارة نورث ريزيدنس</span>
+                  <span className="text-[10px] font-black border-y border-emerald-600 my-0.5 px-2">معتمد رسمي</span>
+                  <span className="text-[7px] font-bold">قسم النظافة</span>
+                </div>
+              </div>
+
+              {/* Tenant Signature */}
+              <div className="space-y-6">
+                <p className="font-bold text-slate-700">توقيع المستأجر / العميل</p>
+                <div className="border-b-2 border-dashed border-slate-400 w-28 mx-auto pt-4"></div>
+                <p className="text-[10px] text-slate-400">{tenantName}</p>
+              </div>
+
+            </div>
+
+            {/* Footer tiny text */}
+            <div className="mt-8 pt-3 border-t border-slate-200 flex justify-between text-[10px] text-slate-400 font-mono">
+              <span>نظام إدارة العمليات - نورث ريزيدنس</span>
+              <span>صفحة 1 من 1</span>
+              <span>{window.location.host}</span>
+            </div>
+
+          </div>
+
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
 // --- Real Estate Management Component ---
 // --- Main App Component ---
 function AppContent() {
@@ -6577,8 +7760,33 @@ function AppContent() {
   const [selectedWhatsAppTenant, setSelectedWhatsAppTenant] = useState<Tenant | null>(null);
   const [isSubscriptionModalOpen, setIsSubscriptionModalOpen] = useState(false);
   const [isActionsDropdownOpen, setIsActionsDropdownOpen] = useState(false);
+  const [isNorthCleaningClaimModalOpen, setIsNorthCleaningClaimModalOpen] = useState(false);
+  const [selectedNorthAptForClaim, setSelectedNorthAptForClaim] = useState<string | undefined>(undefined);
+  const [selectedCleaningClaim, setSelectedCleaningClaim] = useState<{
+    request: CleaningRequest;
+    totalPrice?: number;
+    count?: number;
+    isPaid?: boolean;
+  } | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [isListeningApt, setIsListeningApt] = useState(false);
+  const [carSubViewMode, setCarSubViewMode] = useState<'excel' | 'cards'>('excel');
+  const [carDailySearch, setCarDailySearch] = useState('');
+  const [carDailyStatusFilter, setCarDailyStatusFilter] = useState<'all' | 'pending' | 'completed' | 'paid' | 'unpaid'>('all');
+  const [carDailyWorkerFilter, setCarDailyWorkerFilter] = useState<string>('all');
+  const [carDailyPackageFilter, setCarDailyPackageFilter] = useState<'all' | 'كبيرة' | 'صغيرة'>('all');
+  const [carViewTab, setCarViewTab] = useState<'daily' | 'sheet' | 'week-schedule'>('daily');
+  const [deletedCarSubKeys, setDeletedCarSubKeys] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('fyozr_deleted_car_subs');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [carRequestToDelete, setCarRequestToDelete] = useState<CleaningRequest | null>(null);
+  const [isDeleteAllCarsModalOpen, setIsDeleteAllCarsModalOpen] = useState(false);
+  const [isDeletingAllCars, setIsDeletingAllCars] = useState(false);
 
   const cleanSpokenArabicText = (text: string): string => {
     return text
@@ -6818,7 +8026,7 @@ function AppContent() {
   const [viewMode, setViewMode] = useState<'list' | 'summary' | 'calendar'>('list');
   const [selectedRequestIds, setSelectedRequestIds] = useState<string[]>([]);
   const [selectedApartment, setSelectedApartment] = useState<{ building: string, apartment: string } | null>(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const navRef = useRef<HTMLDivElement>(null);
 
   const scrollNav = (direction: 'left' | 'right') => {
@@ -6875,9 +8083,9 @@ function AppContent() {
   const [globalSelectedDate, setGlobalSelectedDate] = useState(new Date());
   const [appName, setAppName] = useState('North Residence');
   const [appLogo, setAppLogo] = useState<string | null>(null);
-  const [appBackground, setAppBackground] = useState<string | null>(null);
-  const [bgOpacity, setBgOpacity] = useState(20);
-  const [themeColor, setThemeColor] = useState('emerald');
+  const [appBackground, setAppBackground] = useState<string | null>('/assets/aistudio/image_d8eaf4e5.png');
+  const [bgOpacity, setBgOpacity] = useState(30);
+  const [themeColor, setThemeColor] = useState('pastel');
   const [adminPhone, setAdminPhone] = useState('');
   const [whatsappGroupLink, setWhatsappGroupLink] = useState('https://chat.whatsapp.com/GiYTHd978eMJ3o2oEDb2JC');
   const [clubSubscriptions, setClubSubscriptions] = useState<ClubSubscription[]>([]);
@@ -6901,8 +8109,9 @@ function AppContent() {
   const [isOverduePanelExpanded, setIsOverduePanelExpanded] = useState(false);
   const [publicView, setPublicView] = useState<'book' | 'renew-club' | null>(null);
   const [renewalSubId, setRenewalSubId] = useState<string | null>(null);
-  const [apartments, setApartments] = useState<Apartment[]>([]);
-  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [apartments, setApartments] = useState<Apartment[]>(INITIAL_SYNTHETIC_APARTMENTS);
+  const [tenants, setTenants] = useState<Tenant[]>(INITIAL_SYNTHETIC_TENANTS);
+  const [isReplacingTenants, setIsReplacingTenants] = useState(false);
   const [isFinancialDashboardOpen, setIsFinancialDashboardOpen] = useState(false);
   const [isTenantModalOpen, setIsTenantModalOpen] = useState(false);
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
@@ -7021,8 +8230,6 @@ function AppContent() {
     { id: 'تكرار الطلبات', label: 'تكرار الطلبات', icon: Repeat },
     { id: 'staff', label: 'إدارة العمالة', icon: UserIcon },
     { id: 'club-subscriptions', label: 'اشتراكات النادي', icon: ListTodo },
-    { id: 'game-room-bookings', label: 'حجز غرفة الألعاب', icon: Gamepad2 },
-    { id: 'bookings', label: 'إدارة الحجوزات', icon: Calendar },
     { id: 'طلبات الماء', label: 'إدارة المياه والمخزون', icon: Droplets },
     { id: 'طلبات الصيانة', label: 'طلبات الصيانة', icon: Wrench },
     ...BUILDINGS.map(b => ({ id: b, label: b, icon: Home })),
@@ -7030,6 +8237,7 @@ function AppContent() {
     { id: 'car-subscriptions', label: 'اشتراكات السيارات', icon: CalendarPlus },
     { id: 'property-units', label: 'إدارة الوحدات', icon: Home },
     { id: 'tenants', label: 'العقود', icon: FileCheck },
+    { id: 'quotations', label: 'عروض الأسعار', icon: ReceiptIcon },
     { id: 'users', label: 'إدارة المستخدمين', icon: Users },
     { id: 'settings', label: 'إعدادات الهوية', icon: Settings }
   ].filter(item => {
@@ -7097,14 +8305,14 @@ function AppContent() {
   useEffect(() => {
     if (!user) return;
     const unsubscribeApts = onSnapshot(collection(db, 'apartments'), (snapshot) => {
-      const apts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setApartments(apts);
+      const apts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+      setApartments(apts.length >= 100 ? apts : INITIAL_SYNTHETIC_APARTMENTS);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'apartments');
     });
     const unsubscribeTenants = onSnapshot(collection(db, 'tenants'), (snapshot) => {
-      const t = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setTenants(t);
+      const t = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+      setTenants(t.length >= 80 ? t : INITIAL_SYNTHETIC_TENANTS);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'tenants');
     });
@@ -7112,6 +8320,14 @@ function AppContent() {
       unsubscribeApts();
       unsubscribeTenants();
     };
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const hasSyncedV3 = localStorage.getItem('fyozr_tenants_synced_v3');
+    if (!hasSyncedV3) {
+      handleReplaceAllTenantsWithNewSheet(false);
+    }
   }, [user]);
 
 
@@ -7639,11 +8855,14 @@ function AppContent() {
     const q = query(collection(db, 'requests'), orderBy('date', 'desc'));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as CleaningRequest[];
-      setRequests(data);
+      const uniqueDocsMap = new Map<string, CleaningRequest>();
+      snapshot.docs.forEach(docSnap => {
+        uniqueDocsMap.set(docSnap.id, {
+          id: docSnap.id,
+          ...docSnap.data()
+        } as CleaningRequest);
+      });
+      setRequests(Array.from(uniqueDocsMap.values()));
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'requests');
     });
@@ -7756,46 +8975,96 @@ function AppContent() {
     }
   };
 
-  const initializePropertyData = async () => {
-    try {
-      const aptsRef = collection(db, 'apartments');
-      const tenantsRef = collection(db, 'tenants');
-      
-      const aptsSnap = await getDocs(aptsRef);
-      if (!aptsSnap.empty) {
-        toast.info('بيانات العقارات موجودة مسبقاً');
-        return;
-      }
-
-      toast.loading('جاري تهيئة بيانات العقارات...');
-
-      for (const b of PROPERTY_BUILDINGS) {
-        for (const num of b.apartments) {
-          const aptId = `${b.id}-${num}`;
-          const isTwoBedroom = parseInt(num) % 4 === 0 || parseInt(num) % 7 === 0;
-          
-          await setDoc(doc(db, 'apartments', aptId), {
-            buildingId: b.id,
-            buildingName: b.name,
-            number: num,
-            status: 'vacant',
-            roomType: isTwoBedroom ? 'غرفتين و صالة' : 'غرفة و صالة'
-          });
-        }
-      }
-      toast.success('تمت تهيئة بيانات العقارات بنجاح');
-    } catch (error) {
-      console.error(error);
-      toast.error('حدث خطأ أثناء تهيئة البيانات');
+  const handleReplaceAllTenantsWithNewSheet = async (showToast = true) => {
+    setIsReplacingTenants(true);
+    let loadingToastId: any = null;
+    if (showToast) {
+      loadingToastId = toast.loading('جاري حذف البيانات السابقة واستبدالها ببيانات الجدول الجديد (117 عقد و 139 وحدة)...');
     }
+
+    try {
+      // 1. Delete all existing tenants in Firestore
+      const existingTenantsSnap = await getDocs(collection(db, 'tenants'));
+      const deletePromises = existingTenantsSnap.docs.map(d => deleteDoc(doc(db, 'tenants', d.id)));
+      await Promise.all(deletePromises);
+
+      // 2. Add the 117 new tenants into Firestore
+      const batchSize = 25;
+      for (let i = 0; i < INITIAL_SYNTHETIC_TENANTS.length; i += batchSize) {
+        const chunk = INITIAL_SYNTHETIC_TENANTS.slice(i, i + batchSize);
+        await Promise.all(chunk.map(t => {
+          const tenantData: Record<string, any> = {
+            id: t.id,
+            apartmentId: t.apartmentId,
+            apartmentNumber: t.id.replace('tenant-', ''),
+            name: t.name,
+            nationality: t.nationality || 'سعودي',
+            phone: t.phone || '',
+            company: t.company || '',
+            contractValue: Number(t.contractValue) || 0,
+            collectedAmount: Number(t.collectedAmount) || 0,
+            paymentFrequency: t.paymentFrequency || 'monthly',
+            paymentMethod: t.paymentMethod || 'cash',
+            startDate: t.startDate,
+            endDate: t.endDate,
+            nextPaymentDate: t.nextPaymentDate,
+            status: t.status || 'active'
+          };
+          if (t.idNumber) tenantData.idNumber = t.idNumber;
+          if (t.duration) tenantData.duration = t.duration;
+          if (t.internetRequest !== undefined) tenantData.internetRequest = t.internetRequest;
+          return setDoc(doc(db, 'tenants', t.id), tenantData);
+        }));
+      }
+
+      // 3. Upsert all 139 apartments in Firestore (guaranteeing no undefined fields)
+      for (let i = 0; i < INITIAL_SYNTHETIC_APARTMENTS.length; i += batchSize) {
+        const chunk = INITIAL_SYNTHETIC_APARTMENTS.slice(i, i + batchSize);
+        await Promise.all(chunk.map(apt => {
+          const aptData: Record<string, any> = {
+            id: apt.id,
+            buildingId: apt.buildingId,
+            buildingName: apt.buildingName,
+            number: apt.number,
+            status: apt.status,
+            roomType: apt.roomType || 'غرفة و صالة'
+          };
+          if (apt.tenantId) {
+            aptData.tenantId = apt.tenantId;
+          }
+          return setDoc(doc(db, 'apartments', apt.id), aptData, { merge: true });
+        }));
+      }
+
+      setTenants(INITIAL_SYNTHETIC_TENANTS);
+      setApartments(INITIAL_SYNTHETIC_APARTMENTS);
+      localStorage.setItem('fyozr_tenants_synced_v3', 'true');
+
+      if (showToast && loadingToastId) {
+        toast.dismiss(loadingToastId);
+        toast.success('تم حذف البيانات واستبدالها بنجاح ببيانات الجدول الجديد (117 عقد و 139 وحدة)! 🎉');
+      }
+    } catch (err) {
+      console.error(err);
+      if (showToast && loadingToastId) {
+        toast.dismiss(loadingToastId);
+        toast.error('حدث خطأ أثناء استبدال البيانات');
+      }
+    } finally {
+      setIsReplacingTenants(false);
+    }
+  };
+
+  const initializePropertyData = async () => {
+    await handleReplaceAllTenantsWithNewSheet(true);
   };
 
   const getExpiringContracts = (days: number) => {
     const now = startOfDay(new Date());
     const limitDate = addDays(now, days);
-    return tenants.filter(t => {
+    const sourceTenants = tenants.length > 0 ? tenants : INITIAL_SYNTHETIC_TENANTS;
+    return sourceTenants.filter(t => {
       const end = safeToDate(t.endDate);
-      // Include already expired AND those expiring within the next 'days' days
       return end <= limitDate;
     }).sort((a, b) => safeToDate(a.endDate).getTime() - safeToDate(b.endDate).getTime());
   };
@@ -7804,7 +9073,7 @@ function AppContent() {
     try {
       const tenant = tenants.find(t => t.id === tenantId);
       if (tenant) {
-        await updateDoc(doc(db, 'apartments', tenant.apartmentId), { status: 'vacant', tenantId: null });
+        await updateDoc(doc(db, 'apartments', tenant.apartmentId), { status: 'vacant', tenantId: deleteField() });
       }
       await deleteDoc(doc(db, 'tenants', tenantId));
       toast.success('تم حذف العقد بنجاح');
@@ -8347,345 +9616,76 @@ function AppContent() {
   };
 
   const importCarSubscriptionsFromImage = async () => {
-    const loadingId = toast.loading('جاري استيراد اشتراكات غسيل السيارات من الصورة...');
+    const loadingId = toast.loading('جاري استيراد وتحديث اشتراكات غسيل السيارات من الصورة (26 اشتراك)...');
     try {
-      const CAR_IMAGE_DATA = [
-        {
-          apartmentNumber: "23-28029",
-          apartment: "134",
-          car: "toyota prado",
-          startDate: "2026-01-01",
-          workerName: "سيف ، عبدالله",
-          price: 600,
-          monthsCount: 3,
-          schedule: [2, 5],
-        },
-        {
-          apartmentNumber: "5901- AVR",
-          apartment: "522",
-          car: "Jetour T2",
-          startDate: "2026-04-01",
-          workerName: "قلم ، شميم",
-          price: 600,
-          monthsCount: 3,
-          schedule: [0, 4],
-        },
-        {
-          apartmentNumber: "TTU-77",
-          apartment: "327",
-          car: "jeep wrangler",
-          startDate: "2026-03-01",
-          workerName: "عراف وعارفور",
-          price: 600,
-          monthsCount: 3,
-          schedule: [3, 6],
-        },
-        {
-          apartmentNumber: "AJS-20",
-          apartment: "327",
-          car: "Range rover",
-          startDate: "2026-03-01",
-          workerName: "عراف وعارفور",
-          price: 600,
-          monthsCount: 3,
-          schedule: [3, 6],
-        },
-        {
-          apartmentNumber: "LTR-3100",
-          apartment: "517",
-          car: "kiea stranger",
-          startDate: "2026-01-01",
-          workerName: "قلم ، شميم",
-          price: 300,
-          monthsCount: 2,
-          schedule: [0, 4],
-        },
-        {
-          apartmentNumber: "1724 VJD",
-          apartment: "422",
-          car: "Merceds",
-          startDate: "2026-03-02",
-          workerName: "منصور، شهاب",
-          price: 400,
-          monthsCount: 2,
-          schedule: [3, 6],
-        },
-        {
-          apartmentNumber: "klr-7132",
-          apartment: "313",
-          car: "geely white",
-          startDate: "2026-05-01",
-          workerName: "عراف وعارفور",
-          price: 300,
-          monthsCount: 2,
-          schedule: [2, 6],
-        },
-        {
-          apartmentNumber: "htr 1729",
-          apartment: "227",
-          car: "audi s3",
-          startDate: "2026-04-01",
-          workerName: "شوهاد، حسن",
-          price: 300,
-          monthsCount: 2,
-          schedule: [2, 6],
-        },
-        {
-          apartmentNumber: "tgr-1078",
-          apartment: "217",
-          car: "nissan patrol",
-          startDate: "2026-04-01",
-          workerName: "شوهاد، حسن",
-          price: 600,
-          monthsCount: 3,
-          schedule: [0, 3],
-        },
-        {
-          apartmentNumber: "Bahrain",
-          apartment: "204",
-          car: "nissan patrol",
-          startDate: "2026-06-01",
-          workerName: "شوهاد، حسن",
-          price: 600,
-          monthsCount: 3,
-          schedule: [2, 6],
-        },
-        {
-          apartmentNumber: "LDE 151",
-          apartment: "135",
-          car: "BMW",
-          startDate: "2026-07-01",
-          workerName: "سيف ، عبدالله",
-          price: 450,
-          monthsCount: 3,
-          schedule: [3, 6],
-        },
-        {
-          apartmentNumber: "GSR 1846",
-          apartment: "135",
-          car: "FORD TERRITOR",
-          startDate: "2026-07-01",
-          workerName: "سيف ، عبدالله",
-          price: 600,
-          monthsCount: 3,
-          schedule: [3, 6],
-        },
-        {
-          apartmentNumber: "ajs-3315",
-          apartment: "407",
-          car: "toyota",
-          startDate: "2026-06-01",
-          workerName: "منصور، شهاب",
-          price: 400,
-          monthsCount: 2,
-          schedule: [2, 6],
-        },
-        {
-          apartmentNumber: "no. 683163",
-          apartment: "219",
-          car: "Nissan extrail",
-          startDate: "2026-08-01",
-          workerName: "شوهاد، حسن",
-          price: 700,
-          monthsCount: 4,
-          schedule: [1, 4],
-        },
-        {
-          apartmentNumber: "lvd-1290",
-          apartment: "224",
-          car: "lexus es",
-          startDate: "2026-10-01",
-          workerName: "شوهاد، حسن",
-          price: 450,
-          monthsCount: 3,
-          schedule: [3, 6],
-        },
-        {
-          apartmentNumber: "بدون لوحة - 403",
-          apartment: "403",
-          car: "alfa romio",
-          startDate: "2026-01-17",
-          workerName: "منصور، شهاب",
-          price: 600,
-          monthsCount: 3,
-          schedule: [1, 4],
-        },
-        {
-          apartmentNumber: "THD - 2660",
-          apartment: "316",
-          car: "mini coper",
-          startDate: "2026-12-01",
-          workerName: "عراف وعارفور",
-          price: 600,
-          monthsCount: 4,
-          schedule: [2, 6],
-        },
-        {
-          apartmentNumber: "lkr-5466",
-          apartment: "526",
-          car: "genss- gray",
-          startDate: "2026-01-06",
-          workerName: "قلم ، شميم",
-          price: 450,
-          monthsCount: 3,
-          schedule: [2, 5],
-        },
-        {
-          apartmentNumber: "5509 BZD",
-          apartment: "425",
-          car: "merceds suv",
-          startDate: "2026-01-13",
-          workerName: "منصور، شهاب",
-          price: 400,
-          monthsCount: 2,
-          schedule: [2, 6],
-        },
-        {
-          apartmentNumber: "tkr-6545",
-          apartment: "424",
-          car: "nissan",
-          startDate: "2026-01-19",
-          workerName: "منصور، شهاب",
-          price: 400,
-          monthsCount: 4,
-          schedule: [1],
-        },
-        {
-          apartmentNumber: "68217",
-          apartment: "411",
-          car: "أبو ظبي tandra",
-          startDate: "2026-01-21",
-          workerName: "منصور، شهاب",
-          price: 200,
-          monthsCount: 1,
-          schedule: [0, 3],
-        },
-        {
-          apartmentNumber: "ksr-7171",
-          apartment: "233",
-          car: "defender",
-          startDate: "2026-01-21",
-          workerName: "شوهاد، حسن",
-          price: 520,
-          monthsCount: 1,
-          schedule: [1, 2, 3, 4, 5],
-        },
-        {
-          apartmentNumber: "DAR-5454",
-          apartment: "322",
-          car: "merceds cope",
-          startDate: "2026-01-26",
-          workerName: "عراف وعارفور",
-          price: 600,
-          monthsCount: 4,
-          schedule: [2, 5],
-        },
-        {
-          apartmentNumber: "ahd-5570",
-          apartment: "1110",
-          car: "porche",
-          startDate: "2026-01-31",
-          workerName: "شاهين، عبدالله",
-          price: 600,
-          monthsCount: 3,
-          schedule: [0, 3],
-        },
-        {
-          apartmentNumber: "BDR-5197",
-          apartment: "1110",
-          car: "toress",
-          startDate: "2026-01-31",
-          workerName: "شاهين، عبدالله",
-          price: 450,
-          monthsCount: 3,
-          schedule: [0, 3],
-        },
-        {
-          apartmentNumber: "NXR 3612",
-          apartment: "419",
-          car: "FORD TERRITOR",
-          startDate: "2026-02-24",
-          workerName: "منصور، شهاب",
-          price: 400,
-          monthsCount: 2,
-          schedule: [2, 6],
-        },
-        {
-          apartmentNumber: "NZR 5978",
-          apartment: "125",
-          car: "Jetour",
-          startDate: "2026-02-25",
-          workerName: "سيف ، عبدالله",
-          price: 400,
-          monthsCount: 2,
-          schedule: [3, 6],
-        },
-        {
-          apartmentNumber: "قطر proche",
-          apartment: "107",
-          car: "proche",
-          startDate: "2026-03-07",
-          workerName: "سيف ، عبدالله",
-          price: 400,
-          monthsCount: 2,
-          schedule: [2, 6],
-        },
-        {
-          apartmentNumber: "بدون لوحة - 106",
-          apartment: "106",
-          car: "lexus es",
-          startDate: "2026-04-07",
-          workerName: "سيف ، عبدالله",
-          price: 150,
-          monthsCount: 1,
-          schedule: [2, 6],
-        },
-        {
-          apartmentNumber: "٢٣٤٨ س د ل",
-          apartment: "106",
-          car: "Jeep 212",
-          startDate: "2026-04-26",
-          workerName: "سيف ، عبدالله",
-          price: 200,
-          monthsCount: 1,
-          schedule: [0, 3],
-        }
-      ];
-
       let importedCount = 0;
-      for (const item of CAR_IMAGE_DATA) {
-        const alreadyExists = requests.some(r => 
+      let updatedCount = 0;
+
+      for (const item of INITIAL_CAR_SUBSCRIPTIONS_DATA) {
+        const alreadyExists = requests.find(r => 
           r.serviceType === 'تنظيف سيارات' && 
           r.isSubscription && 
-          r.apartmentNumber === item.apartmentNumber &&
-          (r.notes || '').includes(item.car)
+          (r.apartment === item.apartmentNumber || r.apartmentNumber === item.apartmentNumber) &&
+          r.price === item.price
         );
 
-        if (alreadyExists) continue;
-
         const start = new Date(item.startDate);
-        const end = addMonths(start, item.monthsCount);
+        const end = new Date(item.nextRenewalDate);
+
+        if (alreadyExists) {
+          // Update it with latest payment status and days
+          await updateDoc(doc(db, 'requests', alreadyExists.id), {
+            apartment: item.apartmentNumber,
+            apartmentNumber: item.apartmentNumber,
+            car: item.carName || `باقة ${item.packageSize}`,
+            price: item.price,
+            subscriptionSchedule: item.schedule,
+            paymentStatus: item.paymentStatus,
+            notes: `باقة: ${item.packageSize} | أيام: ${item.daysText}`,
+            workerName: item.workerName || 'فريق غسيل السيارات',
+            subscriptionPayments: [
+              {
+                monthKey: '2026-10',
+                monthName: 'أكتوبر 2026',
+                isPaid: item.paymentStatus === 'paid',
+                amount: item.price,
+                paidDate: item.paymentStatus === 'paid' ? '2026-10-01' : ''
+              }
+            ]
+          });
+          updatedCount++;
+          continue;
+        }
 
         const docData = {
           serviceType: 'تنظيف سيارات',
           apartmentNumber: item.apartmentNumber,
-          apartment: item.apartment,
-          car: item.car,
+          apartment: item.apartmentNumber,
+          car: item.carName || `باقة ${item.packageSize}`,
           price: item.price,
           date: Timestamp.fromDate(start),
           subscriptionStartDate: Timestamp.fromDate(start),
           subscriptionEndDate: Timestamp.fromDate(end),
           subscriptionSchedule: item.schedule,
           subscriptionFrequency: 'weekly',
-          monthsCount: item.monthsCount,
+          monthsCount: 1,
           isSubscription: true,
-          workerName: item.workerName,
-          notes: `السيارة: ${item.car} | الشقة: ${item.apartment}`,
+          workerName: item.workerName || 'فريق غسيل السيارات',
+          notes: `باقة: ${item.packageSize} | أيام: ${item.daysText}`,
           userId: user?.uid || 'anonymous',
           createdAt: Timestamp.now(),
           status: 'completed',
-          paymentStatus: 'paid',
-          buildingName: 'نظافة سيارات'
+          paymentStatus: item.paymentStatus,
+          buildingName: 'نظافة سيارات',
+          subscriptionPayments: [
+            {
+              monthKey: '2026-10',
+              monthName: 'أكتوبر 2026',
+              isPaid: item.paymentStatus === 'paid',
+              amount: item.price,
+              paidDate: item.paymentStatus === 'paid' ? '2026-10-01' : ''
+            }
+          ]
         };
 
         await addDoc(collection(db, 'requests'), docData);
@@ -8693,11 +9693,7 @@ function AppContent() {
       }
 
       toast.dismiss(loadingId);
-      if (importedCount > 0) {
-        toast.success(`تم استيراد ${importedCount} اشتراك سيارة بنجاح`);
-      } else {
-        toast.info('جميع الاشتراكات موجودة مسبقاً في النظام');
-      }
+      toast.success(`تم استيراد وحفظ ${importedCount + updatedCount} اشتراك سيارة في قاعدة البيانات بنجاح`);
     } catch (err) {
       console.error(err);
       toast.dismiss(loadingId);
@@ -9116,8 +10112,124 @@ function AppContent() {
     }
   };
 
+  // Comprehensive merge of Firestore requests with the 26 car subscriptions from the Excel table
+  const mergedAllCarRequests = React.useMemo<CleaningRequest[]>(() => {
+    const isWiped = deletedCarSubKeys.includes('all');
+    const existingReqs = requests.filter(r => r.serviceType === 'تنظيف سيارات' && !deletedCarSubKeys.includes(r.id));
+    const existingSubs = existingReqs.filter(r => r.isSubscription);
+    const claimedMatchIds = new Set<string>();
+
+    const tableItemsMapped: CleaningRequest[] = isWiped ? [] : INITIAL_CAR_SUBSCRIPTIONS_DATA
+      .filter((item, idx) => {
+        const synId = `table-sub-${idx}-${item.apartmentNumber}`;
+        return !deletedCarSubKeys.includes(synId) && !deletedCarSubKeys.includes(item.apartmentNumber);
+      })
+      .map((item, idx) => {
+      // Find matching record in Firestore that hasn't been claimed yet
+      const match = existingSubs.find(r => 
+        !claimedMatchIds.has(r.id) &&
+        (r.apartment === item.apartmentNumber || r.apartmentNumber === item.apartmentNumber) &&
+        (r.price === item.price || (r.car && item.carName && r.car.toLowerCase() === item.carName.toLowerCase()))
+      ) || existingSubs.find(r => !claimedMatchIds.has(r.id) && (r.apartment === item.apartmentNumber || r.apartmentNumber === item.apartmentNumber));
+
+      if (match) {
+        claimedMatchIds.add(match.id);
+        return {
+          ...match,
+          car: match.car || item.carName || `باقة ${item.packageSize}`,
+          workerName: match.workerName || item.workerName || 'فريق غسيل السيارات',
+          subscriptionSchedule: (match.subscriptionSchedule && match.subscriptionSchedule.length > 0) ? match.subscriptionSchedule : item.schedule,
+          notes: match.notes || `باقة: ${item.packageSize} | ${item.daysText}`,
+          daysText: item.daysText,
+          packageSize: item.packageSize,
+          price: match.price || item.price,
+          startDateText: item.startDate,
+        };
+      }
+
+      // Synthesized subscription directly from the table
+      const start = new Date(item.startDate);
+      const end = new Date(item.nextRenewalDate);
+      return {
+        id: `table-sub-${idx}-${item.apartmentNumber}`,
+        serviceType: 'تنظيف سيارات',
+        apartmentNumber: item.apartmentNumber,
+        apartment: item.apartmentNumber,
+        car: item.carName || `باقة ${item.packageSize}`,
+        price: item.price,
+        date: start as any,
+        subscriptionStartDate: start as any,
+        subscriptionEndDate: end as any,
+        subscriptionSchedule: item.schedule,
+        subscriptionFrequency: 'weekly',
+        monthsCount: 1,
+        isSubscription: true,
+        workerName: item.workerName || 'فريق غسيل السيارات',
+        notes: `باقة: ${item.packageSize} | ${item.daysText}`,
+        status: 'completed',
+        paymentStatus: item.paymentStatus,
+        buildingName: 'نظافة سيارات',
+        completedDates: [],
+        daysText: item.daysText,
+        packageSize: item.packageSize,
+        startDateText: item.startDate,
+        createdAt: start as any
+      } as CleaningRequest;
+    });
+
+    const otherReqs = existingReqs.filter(r => !claimedMatchIds.has(r.id));
+    
+    // Ensure 100% ID uniqueness across all car requests
+    const seenIds = new Set<string>();
+    const result: CleaningRequest[] = [];
+    [...tableItemsMapped, ...otherReqs].forEach((req, index) => {
+      let finalId = req.id || `car-req-${index}`;
+      if (seenIds.has(finalId)) {
+        finalId = `${finalId}-dup-${index}`;
+      }
+      seenIds.add(finalId);
+      result.push({ ...req, id: finalId });
+    });
+    return result;
+  }, [requests, deletedCarSubKeys]);
+
   const updateStatus = async (id: string, field: 'status' | 'paymentStatus' | 'price', value: string | number, skipWhatsApp = false) => {
     try {
+      if (id.startsWith('table-sub-')) {
+        const item = mergedAllCarRequests.find(r => r.id === id);
+        if (item) {
+          const docData: any = {
+            serviceType: 'تنظيف سيارات',
+            apartmentNumber: item.apartmentNumber,
+            apartment: item.apartmentNumber,
+            car: item.car || 'سيارة باقة',
+            price: item.price || 200,
+            date: Timestamp.fromDate(safeToDate(item.date)),
+            subscriptionStartDate: Timestamp.fromDate(safeToDate(item.subscriptionStartDate || item.date)),
+            subscriptionEndDate: Timestamp.fromDate(safeToDate(item.subscriptionEndDate || addMonths(safeToDate(item.date), 1))),
+            subscriptionSchedule: item.subscriptionSchedule || [],
+            subscriptionFrequency: 'weekly',
+            monthsCount: 1,
+            isSubscription: true,
+            workerName: item.workerName || 'فريق غسيل السيارات',
+            notes: item.notes || '',
+            userId: user?.uid || 'admin',
+            createdAt: Timestamp.now(),
+            status: 'completed',
+            paymentStatus: field === 'paymentStatus' ? value : (item.paymentStatus || 'unpaid'),
+            buildingName: 'نظافة سيارات',
+            completedDates: item.completedDates || [],
+            [field]: value
+          };
+          if (field === 'paymentStatus' && value === 'paid') {
+            docData.paymentDate = Timestamp.now();
+          }
+          await addDoc(collection(db, 'requests'), docData);
+          toast.success('تم حفظ وتحديث الحالة في قاعدة البيانات بنجاح');
+          return;
+        }
+      }
+
       const requestRef = doc(db, 'requests', id);
       const updateData: any = { [field]: value };
       if (field === 'paymentStatus') {
@@ -9137,11 +10249,6 @@ function AppContent() {
   };
   
   const toggleDailyCompletion = async (req: CleaningRequest, date: Date) => {
-    if (!req.isSubscription) {
-      const nextStatus = req.status === 'pending' ? 'completed' : 'pending';
-      return updateStatus(req.id, 'status', nextStatus);
-    }
-    
     const dateStr = format(date, 'yyyy-MM-dd');
     const currentCompleted = req.completedDates || [];
     const isCompleted = currentCompleted.includes(dateStr);
@@ -9149,16 +10256,130 @@ function AppContent() {
     const newCompleted = isCompleted 
       ? currentCompleted.filter(d => d !== dateStr)
       : [...currentCompleted, dateStr];
-      
+
+    if (!req.isSubscription) {
+      const nextStatus = req.status === 'pending' ? 'completed' : 'pending';
+      return updateStatus(req.id, 'status', nextStatus);
+    }
+
+    if (req.id.startsWith('table-sub-')) {
+      try {
+        await addDoc(collection(db, 'requests'), {
+          serviceType: 'تنظيف سيارات',
+          apartmentNumber: req.apartmentNumber,
+          apartment: req.apartmentNumber,
+          car: req.car || 'سيارة باقة',
+          price: req.price || 200,
+          date: Timestamp.fromDate(safeToDate(req.date || req.subscriptionStartDate)),
+          subscriptionStartDate: Timestamp.fromDate(safeToDate(req.subscriptionStartDate || req.date)),
+          subscriptionEndDate: Timestamp.fromDate(safeToDate(req.subscriptionEndDate || addMonths(safeToDate(req.date), 1))),
+          subscriptionSchedule: req.subscriptionSchedule || [],
+          subscriptionFrequency: 'weekly',
+          monthsCount: 1,
+          isSubscription: true,
+          workerName: req.workerName || 'فريق غسيل السيارات',
+          notes: req.notes || '',
+          userId: user?.uid || 'admin',
+          createdAt: Timestamp.now(),
+          status: 'completed',
+          paymentStatus: req.paymentStatus || 'unpaid',
+          buildingName: 'نظافة سيارات',
+          completedDates: newCompleted,
+          updatedAt: serverTimestamp()
+        });
+        toast.success(isCompleted ? 'تم إلغاء التنفيذ لهذا اليوم' : 'تم تأكيد إتمام الغسيل بنجاح لهذا اليوم ✓');
+      } catch (error) {
+        console.error(error);
+        toast.error('حدث خطأ أثناء حفظ حالة التنفيذ');
+      }
+      return;
+    }
+    
     try {
       await updateDoc(doc(db, 'requests', req.id), {
         completedDates: newCompleted,
         updatedAt: serverTimestamp()
       });
+      toast.success(isCompleted ? 'تم إلغاء التنفيذ لهذا اليوم' : 'تم تأكيد إتمام الغسيل بنجاح لهذا اليوم ✓');
     } catch (error) {
       console.error(error);
       toast.error('حدث خطأ أثناء تحديث حالة التنفيذ');
     }
+  };
+
+  const handleDeleteCarRequest = async (req: CleaningRequest) => {
+    try {
+      const aptNumber = req.apartmentNumber || req.apartment || '';
+      // 1. Delete matching documents from Firestore if present
+      const matchingDocs = requests.filter(r => 
+        r.id === req.id || 
+        (r.serviceType === 'تنظيف سيارات' && (r.apartmentNumber === aptNumber || r.apartment === aptNumber) && (!req.car || r.car === req.car))
+      );
+
+      for (const m of matchingDocs) {
+        try {
+          await deleteDoc(doc(db, 'requests', m.id));
+        } catch (err) {
+          console.error('Error deleting doc from firestore', err);
+        }
+      }
+
+      if (req.id && !req.id.startsWith('table-sub-') && !matchingDocs.some(m => m.id === req.id)) {
+        try {
+          await deleteDoc(doc(db, 'requests', req.id));
+        } catch (err) {
+          console.error(err);
+        }
+      }
+
+      // 2. Add to deletedCarSubKeys so synthetic items don't reappear
+      const newKeys = Array.from(new Set([...deletedCarSubKeys, req.id, aptNumber])).filter(Boolean);
+      setDeletedCarSubKeys(newKeys);
+      localStorage.setItem('fyozr_deleted_car_subs', JSON.stringify(newKeys));
+
+      toast.success(`تم حذف سيارة شقة ${aptNumber} بنجاح`);
+    } catch (error) {
+      console.error(error);
+      toast.error('حدث خطأ أثناء حذف طلب تنظيف السيارة');
+    } finally {
+      setCarRequestToDelete(null);
+    }
+  };
+
+  const handleDeleteAllCarRequests = async () => {
+    setIsDeletingAllCars(true);
+    const loadingToast = toast.loading('جاري حذف كافة طلبات واشتراكات تنظيف السيارات...');
+    try {
+      // 1. Delete all car cleaning requests from Firestore
+      const carReqs = requests.filter(r => r.serviceType === 'تنظيف سيارات');
+      const batchSize = 25;
+      for (let i = 0; i < carReqs.length; i += batchSize) {
+        const chunk = carReqs.slice(i, i + batchSize);
+        await Promise.all(chunk.map(r => deleteDoc(doc(db, 'requests', r.id))));
+      }
+
+      // 2. Mark 'all' and all synthetic apartments in deletedCarSubKeys
+      const allAptKeys = INITIAL_CAR_SUBSCRIPTIONS_DATA.map(item => item.apartmentNumber);
+      const newKeys = ['all', ...allAptKeys];
+      setDeletedCarSubKeys(newKeys);
+      localStorage.setItem('fyozr_deleted_car_subs', JSON.stringify(newKeys));
+
+      toast.dismiss(loadingToast);
+      toast.success('تم حذف كافة طلبات واشتراكات تنظيف السيارات بنجاح');
+    } catch (error) {
+      toast.dismiss(loadingToast);
+      console.error(error);
+      toast.error('حدث خطأ أثناء حذف جميع الطلبات');
+    } finally {
+      setIsDeletingAllCars(false);
+      setIsDeleteAllCarsModalOpen(false);
+    }
+  };
+
+  const handleRestoreDefaultCarSubscriptions = () => {
+    localStorage.removeItem('fyozr_deleted_car_subs');
+    setDeletedCarSubKeys([]);
+    toast.success('تمت استعادة قائمة الاشتراكات الافتراضية بنجاح');
   };
 
   const duplicatePreviousMonthSchedule = async () => {
@@ -9552,25 +10773,120 @@ function AppContent() {
   }, [filteredRequests]);
 
   const carCleaningDailyRequests = React.useMemo(() => {
-    return requests.filter(req => {
+    return mergedAllCarRequests.filter(req => {
       if (req.serviceType !== 'تنظيف سيارات') return false;
       
       const reqDate = safeToDate(req.date);
       if (req.isSubscription) {
         const start = safeToDate(req.subscriptionStartDate || req.date);
-        const end = safeToDate(req.subscriptionEndDate);
         const dayOfWeek = globalSelectedDate.getDay();
         
         const checkDate = new Date(globalSelectedDate.getFullYear(), globalSelectedDate.getMonth(), globalSelectedDate.getDate());
         const startDate = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-        const endDate = new Date(end.getFullYear(), end.getMonth(), end.getDate());
         
-        return checkDate >= startDate && checkDate <= endDate && (req.subscriptionSchedule?.includes(dayOfWeek));
+        // If start date is in the future compared to checkDate (e.g. November 2026 for apt 114)
+        if (checkDate < startDate) return false;
+
+        // If stopDate exists
+        if ((req as any).stopDate) {
+          const stop = safeToDate((req as any).stopDate);
+          if (checkDate > stop) return false;
+        }
+
+        const schedule = req.subscriptionSchedule || [];
+        return schedule.includes(dayOfWeek);
       }
       
       return isSameDay(reqDate, globalSelectedDate);
-    }).sort((a, b) => safeToDate(a.date).getTime() - safeToDate(b.date).getTime());
-  }, [requests, globalSelectedDate]);
+    }).sort((a, b) => (a.apartmentNumber || '').localeCompare(b.apartmentNumber || '', undefined, { numeric: true }));
+  }, [mergedAllCarRequests, globalSelectedDate]);
+
+  // 7-day week strip revolving around the week of globalSelectedDate
+  const weekStripDays = React.useMemo(() => {
+    const start = startOfWeek(globalSelectedDate, { weekStartsOn: 0 }); // Sunday start
+    return Array.from({ length: 7 }, (_, i) => {
+      const day = addDays(start, i);
+      const dayOfWeek = day.getDay();
+      
+      const scheduledCars = mergedAllCarRequests.filter(req => {
+        if (req.serviceType !== 'تنظيف سيارات') return false;
+        if (req.isSubscription) {
+          const sDate = safeToDate(req.subscriptionStartDate || req.date);
+          const checkDate = new Date(day.getFullYear(), day.getMonth(), day.getDate());
+          const startDate = new Date(sDate.getFullYear(), sDate.getMonth(), sDate.getDate());
+          if (checkDate < startDate) return false;
+          if ((req as any).stopDate && checkDate > safeToDate((req as any).stopDate)) return false;
+          return (req.subscriptionSchedule || []).includes(dayOfWeek);
+        }
+        return isSameDay(safeToDate(req.date), day);
+      });
+
+      const dayStr = format(day, 'yyyy-MM-dd');
+      const completedCount = scheduledCars.filter(r => 
+        r.isSubscription ? (r.completedDates || []).includes(dayStr) : r.status === 'completed'
+      ).length;
+
+      return {
+        date: day,
+        dayOfWeek,
+        dayName: format(day, 'EEEE', { locale: ar }),
+        dayShortName: format(day, 'EEE', { locale: ar }),
+        dayNumber: format(day, 'd'),
+        monthName: format(day, 'MMM', { locale: ar }),
+        isToday: isToday(day),
+        isSelected: isSameDay(day, globalSelectedDate),
+        totalCars: scheduledCars.length,
+        completedCount,
+        allDone: scheduledCars.length > 0 && completedCount === scheduledCars.length
+      };
+    });
+  }, [globalSelectedDate, mergedAllCarRequests]);
+
+  // Active car subscriptions strictly in selectedMonth (isolated from other months)
+  const activeCarSubscriptionsForSelectedMonth = React.useMemo(() => {
+    const mStart = startOfMonth(selectedMonth);
+    const mEnd = endOfMonth(selectedMonth);
+    return mergedAllCarRequests.filter(r => {
+      if (r.serviceType !== 'تنظيف سيارات' || !r.isSubscription) return false;
+      const sDate = safeToDate(r.subscriptionStartDate || r.date);
+      if (sDate > mEnd) return false;
+      if ((r as any).stopDate && safeToDate((r as any).stopDate) < mStart) return false;
+      return true;
+    });
+  }, [mergedAllCarRequests, selectedMonth]);
+
+  // Distribution summary across the 7 days of the week based on car subscriptions table (strictly for selectedMonth)
+  const weeklyScheduleSummary = React.useMemo(() => {
+    const days = [
+      { id: 0, name: 'الأحد' },
+      { id: 1, name: 'الإثنين' },
+      { id: 2, name: 'الثلاثاء' },
+      { id: 3, name: 'الأربعاء' },
+      { id: 4, name: 'الخميس' },
+      { id: 5, name: 'الجمعة' },
+      { id: 6, name: 'السبت' },
+    ];
+
+    const mStart = startOfMonth(selectedMonth);
+    const mEnd = endOfMonth(selectedMonth);
+
+    return days.map(d => {
+      const carsOnDay = mergedAllCarRequests.filter(r => {
+        if (!r.isSubscription) return false;
+        const sDate = safeToDate(r.subscriptionStartDate || r.date);
+        if (sDate > mEnd) return false;
+        if ((r as any).stopDate && safeToDate((r as any).stopDate) < mStart) return false;
+        const schedule = r.subscriptionSchedule || [];
+        return schedule.includes(d.id);
+      }).sort((a, b) => (a.apartmentNumber || '').localeCompare(b.apartmentNumber || '', undefined, { numeric: true }));
+
+      return {
+        ...d,
+        cars: carsOnDay,
+        count: carsOnDay.length
+      };
+    });
+  }, [mergedAllCarRequests, selectedMonth]);
 
   const groupedRequests = React.useMemo(() => {
     const groups: Record<string, CleaningRequest[]> = {};
@@ -9797,9 +11113,18 @@ function AppContent() {
   return (
     <div className={cn("min-h-screen flex transition-colors duration-300 relative", isDarkMode ? "dark bg-slate-950" : "bg-site")} dir="rtl">
       
+      {/* Light Pastel Ambient Mesh Glows matching image_d8eaf4e5.png */}
+      {!isDarkMode && (
+        <div className="fixed inset-0 pointer-events-none overflow-hidden z-0 select-none">
+          <div className="absolute -top-32 -right-32 w-[600px] h-[600px] rounded-full bg-[#fce7f3]/50 blur-3xl" />
+          <div className="absolute top-1/3 -left-32 w-[650px] h-[650px] rounded-full bg-[#d7f8ec]/55 blur-3xl" />
+          <div className="absolute -bottom-32 right-1/4 w-[550px] h-[550px] rounded-full bg-[#fdeaf2]/40 blur-3xl" />
+        </div>
+      )}
+
       {appBackground && (
         <div 
-          className="fixed inset-0 z-0 pointer-events-none bg-cover bg-center bg-no-repeat"
+          className="fixed inset-0 z-0 pointer-events-none bg-cover bg-center bg-no-repeat transition-opacity duration-500"
           style={{ 
             backgroundImage: `url(${appBackground})`,
             opacity: bgOpacity / 100
@@ -9808,123 +11133,35 @@ function AppContent() {
       )}
       
       <div className="relative z-10 flex w-full">
-      {/* Desktop Sidebar (Push Mode) */}
+      {/* Desktop Sidebar (Push Mode - North Residence Design) */}
       <motion.aside 
         initial={false}
         animate={{ 
-          width: isSidebarOpen ? 320 : 0,
+          width: isSidebarOpen ? 300 : 0,
           opacity: isSidebarOpen ? 1 : 0,
-          marginLeft: isSidebarOpen ? 0 : 0
         }}
-        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-        className="hidden lg:flex flex-col glass border-l dark:border-slate-800 h-screen sticky top-0 overflow-hidden z-50 shadow-2xl"
+        transition={{ type: 'spring', damping: 25, stiffness: 220 }}
+        className="hidden lg:flex flex-col border-l border-pink-100/60 dark:border-slate-800 h-screen sticky top-0 overflow-hidden z-50 shadow-md bg-white/95 backdrop-blur-md"
       >
-        <div className="w-80 flex flex-col h-full">
-          <div className="p-8 border-b dark:border-slate-800 flex items-center justify-between">
-            <div className="flex items-center gap-4 group/sidebar-logo">
-              {appLogo ? (
-                <img 
-                  src={appLogo} 
-                  alt={appName} 
-                  className="w-12 h-12 object-contain rounded-xl shadow-lg"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <div className="bg-primary p-3 rounded-2xl shadow-xl shadow-primary/20 dark:shadow-none shrink-0">
-                  <Building2 className="text-white w-6 h-6" />
-                </div>
-              )}
-              <div className="flex items-center gap-2">
-                <span className="font-cairo font-black text-2xl text-primary dark:text-white tracking-tight">{appName}</span>
-                {isAdmin && (
-                  <button 
-                    onClick={() => setIsBrandingModalOpen(true)}
-                    className="p-1 hover:bg-white dark:hover:bg-slate-800 rounded-lg text-gray-400 opacity-0 group-hover/sidebar-logo:opacity-100 transition-opacity"
-                    title="تغيير الاسم"
-                  >
-                    <Pencil size={16} />
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-          
-          <nav className="flex-1 overflow-y-auto p-6 space-y-3 custom-scrollbar">
-          {NAV_ITEMS.map((item) => {
-            const isAlertTab = item.id === 'tenants';
-            const alertCount = isAlertTab ? getExpiringContracts(30).length : 0;
-            
-            return (
-              <motion.button
-                key={item.id}
-                whileHover={{ x: -6, y: -2, scale: 1.015 }}
-                whileTap={{ y: 2, scale: 0.985 }}
-                onClick={() => {
-                  if (item.id === 'settings') {
-                    setIsBrandingModalOpen(true);
-                  } else {
-                    setActiveTab(item.id);
-                  }
-                }}
-                className={cn(
-                  "w-full flex items-center justify-between px-5 py-4 rounded-[1.5rem] font-cairo font-bold text-sm transition-all duration-150 cursor-pointer relative",
-                  activeTab === item.id
-                    ? "bg-gradient-to-b from-primary to-primary-dark text-white border-t border-t-white/30 border-x border-x-white/10 border-b-[5px] border-b-primary-dark shadow-[0_8px_16px_rgba(0,0,0,0.18)]"
-                    : "bg-white dark:bg-slate-900/60 text-slate-600 dark:text-slate-400 border border-slate-200/80 dark:border-slate-800/85 border-b-[4px] border-b-slate-250 dark:border-b-slate-950 shadow-[0_4px_6px_-2px_rgba(0,0,0,0.04)] hover:bg-slate-50/80 dark:hover:bg-slate-850/60 hover:text-primary dark:hover:text-primary hover:border-b-[5px]"
-                )}
-              >
-                <div className="flex items-center gap-4">
-                  <item.icon size={22} className={cn(activeTab === item.id ? "text-white" : "text-slate-400 dark:text-slate-500 group-hover:text-primary")} />
-                  <span>{item.label}</span>
-                </div>
-                {alertCount > 0 && (
-                  <span className={cn(
-                    "w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black border-b-[2px]",
-                    activeTab === item.id 
-                      ? "bg-white text-primary border-b-slate-200" 
-                      : "bg-rose-500 text-white border-b-rose-700"
-                  )}>
-                    {alertCount}
-                  </span>
-                )}
-              </motion.button>
-            );
-          })}
-          </nav>
-          
-          <div className="p-6 border-t dark:border-slate-800">
-            <div className="bg-slate-100/60 dark:bg-slate-950/40 p-5 rounded-[2rem] border border-slate-200/80 dark:border-slate-800/85 border-b-[5px] border-b-slate-300 dark:border-b-slate-950/90 shadow-[0_8px_16px_-4px_rgba(0,0,0,0.06)]">
-              <div className="flex items-center justify-between mb-5">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-b from-primary to-primary-dark flex items-center justify-center text-white font-black text-lg border-t border-t-white/20 border-b-[4px] border-b-primary-dark shadow-lg shadow-black/10">
-                    {user.displayName?.[0] || 'U'}
-                  </div>
-                  <div className="text-right">
-                    <p className="font-cairo font-black text-sm text-gray-900 dark:text-white leading-tight">{user.displayName}</p>
-                    <p className="font-cairo font-bold text-[10px] text-gray-400 dark:text-slate-500 mt-1">{isAdmin ? 'مسؤول النظام' : 'مستخدم'}</p>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="space-y-3">
-
-
-                <motion.button 
-                  whileHover={{ scale: 1.02, y: -1 }}
-                  whileTap={{ scale: 0.98, y: 1 }}
-                  onClick={logout}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 border border-rose-100/60 dark:border-rose-900/35 border-b-[3px] border-b-rose-200 dark:border-b-rose-950/70 hover:bg-rose-100/40 dark:hover:bg-rose-900/30 font-bold text-xs hover:border-b-[4px] hover:shadow-[0_4px_8px_rgba(244,63,94,0.06)] transition-all duration-150 cursor-pointer"
-                >
-                  <LogOut size={16} />
-                  تسجيل الخروج
-                </motion.button>
-              </div>
-            </div>
-          </div>
+        <div className="w-[300px] h-full flex flex-col">
+          <AssetsSidebar
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            isSidebarOpen={isSidebarOpen}
+            setIsSidebarOpen={setIsSidebarOpen}
+            appName={appName}
+            appLogo={appLogo}
+            isAdmin={isAdmin}
+            setIsBrandingModalOpen={setIsBrandingModalOpen}
+            user={user}
+            logout={logout}
+            getExpiringContracts={getExpiringContracts}
+            BUILDINGS={BUILDINGS}
+          />
         </div>
       </motion.aside>
 
-      {/* Mobile Sidebar (Drawer Mode) */}
+      {/* Mobile Sidebar (Drawer Mode - North Residence Design) */}
       <AnimatePresence>
         {isSidebarOpen && activeTab !== 'staff' && (
           <>
@@ -9933,111 +11170,30 @@ function AppContent() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsSidebarOpen(false)}
-              className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[55] lg:hidden"
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-[55] lg:hidden"
             />
             <motion.aside 
               initial={{ x: '100%', opacity: 0 }}
               animate={{ x: 0, opacity: 1 }}
               exit={{ x: '100%', opacity: 0 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed top-0 right-0 w-80 h-screen bg-white dark:bg-slate-900 border-l dark:border-slate-800 z-[60] shadow-2xl flex flex-col lg:hidden"
+              transition={{ type: 'spring', damping: 25, stiffness: 220 }}
+              className="fixed top-0 right-0 w-[300px] h-screen bg-white border-l border-slate-200 z-[60] shadow-2xl flex flex-col lg:hidden"
             >
-              <div className="p-6 border-b dark:border-slate-800 flex items-center justify-between">
-                <div className="flex items-center gap-4 group/mobile-logo">
-                  <div className="bg-primary p-2.5 rounded-2xl shadow-lg shadow-primary/20 dark:shadow-none shrink-0">
-                    <Building2 className="text-white w-6 h-6" />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-black text-xl text-primary dark:text-white tracking-tight">{appName}</span>
-                    {isAdmin && (
-                      <button 
-                        onClick={() => setIsBrandingModalOpen(true)}
-                        className="p-1 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg text-gray-400 opacity-0 group-hover/mobile-logo:opacity-100 transition-opacity"
-                        title="تغيير الاسم"
-                      >
-                        <Pencil size={14} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              <div className="flex items-center gap-2">
-                <button 
-                  onClick={() => setIsSidebarOpen(false)}
-                  className="p-2.5 bg-gray-50 dark:bg-slate-800 text-gray-500 dark:text-slate-400 rounded-xl hover:bg-gray-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-              </div>
-              
-              <nav className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-                {NAV_ITEMS.map((item) => {
-                  const isAlertTab = item.id === 'tenants';
-                  const alertCount = isAlertTab ? getExpiringContracts(30).length : 0;
-
-                  return (
-                    <motion.button
-                      key={item.id}
-                      whileHover={{ x: -4, y: -1, scale: 1.01 }}
-                      whileTap={{ y: 2, scale: 0.98 }}
-                      onClick={() => {
-                        if (item.id === 'settings') {
-                          setIsBrandingModalOpen(true);
-                        } else {
-                          setActiveTab(item.id);
-                        }
-                        setIsSidebarOpen(false);
-                      }}
-                      className={cn(
-                        "w-full flex items-center justify-between px-4 py-3.5 rounded-[1.25rem] font-bold text-sm transition-all duration-150 cursor-pointer relative",
-                        activeTab === item.id
-                          ? "bg-gradient-to-b from-primary to-primary-dark text-white border-t border-t-white/30 border-x border-x-white/10 border-b-[5px] border-b-primary-dark shadow-[0_6px_12px_rgba(0,0,0,0.15)]"
-                          : "bg-white dark:bg-slate-900/60 text-slate-600 dark:text-slate-400 border border-slate-200/80 dark:border-slate-800/80 border-b-[3.5px] border-b-slate-300 dark:border-b-slate-950 shadow-[0_3px_5px_-2px_rgba(0,0,0,0.03)] hover:bg-slate-50/80 dark:hover:bg-slate-850/60 hover:text-primary dark:hover:text-primary hover:border-b-[4.5px]"
-                      )}
-                    >
-                      <div className="flex items-center gap-3">
-                        <item.icon size={20} className={cn(activeTab === item.id ? "text-white" : "text-slate-400 dark:text-slate-500")} />
-                        <span>{item.label}</span>
-                      </div>
-                      {alertCount > 0 && (
-                        <span className={cn(
-                          "w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black border-b-[2px]",
-                          activeTab === item.id 
-                            ? "bg-white text-primary border-b-slate-200" 
-                            : "bg-rose-500 text-white border-b-rose-700"
-                        )}>
-                          {alertCount}
-                        </span>
-                      )}
-                    </motion.button>
-                  );
-                })}
-              </nav>
-              
-              <div className="p-4 border-t dark:border-slate-800 space-y-3">
-
-
-                <div className="bg-slate-100/60 dark:bg-slate-950/40 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800/85 border-b-[4px] border-b-slate-300 dark:border-b-slate-950/90 shadow-sm">
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-b from-primary to-primary-dark flex items-center justify-center text-white font-black text-sm border-t border-t-white/20 border-b-[3px] border-b-primary-dark shadow-md">
-                      {user.displayName?.[0] || 'U'}
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs font-black text-gray-900 dark:text-white leading-none">{user.displayName}</p>
-                      <p className="text-[10px] font-bold text-gray-400 dark:text-slate-500 mt-1">{isAdmin ? 'مسؤول النظام' : 'مستخدم'}</p>
-                    </div>
-                  </div>
-                  <motion.button 
-                    whileHover={{ scale: 1.02, y: -0.5 }}
-                    whileTap={{ scale: 0.98, y: 0.5 }}
-                    onClick={logout}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 border border-rose-100/60 dark:border-rose-900/35 border-b-[3px] border-b-rose-200 dark:border-b-rose-950/70 hover:bg-rose-100/40 dark:hover:bg-rose-900/30 font-bold text-xs hover:border-b-[4px] hover:shadow-[0_4px_8px_rgba(244,63,94,0.06)] transition-all duration-150 cursor-pointer"
-                  >
-                    <LogOut size={16} />
-                    تسجيل الخروج
-                  </motion.button>
-                </div>
-              </div>
+              <AssetsSidebar
+                activeTab={activeTab}
+                setActiveTab={setActiveTab}
+                isSidebarOpen={isSidebarOpen}
+                setIsSidebarOpen={setIsSidebarOpen}
+                appName={appName}
+                appLogo={appLogo}
+                isAdmin={isAdmin}
+                setIsBrandingModalOpen={setIsBrandingModalOpen}
+                user={user}
+                logout={logout}
+                getExpiringContracts={getExpiringContracts}
+                BUILDINGS={BUILDINGS}
+                isMobile={true}
+              />
             </motion.aside>
           </>
         )}
@@ -10045,7 +11201,7 @@ function AppContent() {
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top Navigation Bar */}
-        <header className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b dark:border-slate-800 sticky top-0 z-50 transition-colors duration-300">
+        <header className="bg-white/85 dark:bg-slate-900/80 backdrop-blur-md border-b border-pink-100/50 dark:border-slate-800 sticky top-0 z-50 transition-colors duration-300 shadow-[0_4px_20px_-10px_rgba(244,114,182,0.06)]">
           <div className="w-full max-w-none px-4 sm:px-6 lg:px-12">
             <div className="flex items-center justify-between h-20">
               <div className="flex items-center gap-4 shrink-0">
@@ -10083,15 +11239,17 @@ function AppContent() {
 
             {/* Right Side Actions */}
             <div className="flex items-center gap-3">
-              {/* Menu Toggle */}
+              {/* Menu Toggle - Easy and simple show/hide */}
               {activeTab !== 'staff' && (
                 <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
                   onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                  className="p-2.5 bg-gray-50 hover:bg-gray-100 dark:bg-slate-800 dark:hover:bg-slate-750 text-gray-600 dark:text-slate-300 rounded-xl transition-colors border border-gray-100 dark:border-slate-700/50"
+                  className="flex items-center gap-2 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 rounded-xl transition-all border border-slate-200/80 dark:border-slate-700/60 font-cairo text-xs font-bold cursor-pointer shadow-xs"
+                  title={isSidebarOpen ? "إخفاء لوحة التحكم" : "إظهار لوحة التحكم"}
                 >
-                  <Menu size={20} />
+                  <Menu size={18} />
+                  <span>{isSidebarOpen ? 'إخفاء القائمة' : 'إظهار لوحة التحكم'}</span>
                 </motion.button>
               )}
 
@@ -10154,16 +11312,35 @@ function AppContent() {
         </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto custom-scrollbar">
+      <main className="flex-1 overflow-y-auto custom-scrollbar relative">
+        {/* Floating Quick Show Button when sidebar is closed on desktop */}
+        <AnimatePresence>
+          {!isSidebarOpen && activeTab !== 'staff' && (
+            <motion.button
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setIsSidebarOpen(true)}
+              className="fixed top-24 right-5 z-40 bg-white dark:bg-slate-900 shadow-xl border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white px-3.5 py-2.5 rounded-2xl flex items-center gap-2 font-cairo text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-850 transition-all cursor-pointer group"
+              title="إظهار لوحة التحكم"
+            >
+              <LayoutGrid size={16} className="text-primary group-hover:scale-110 transition-transform" />
+              <span>إظهار القائمة</span>
+            </motion.button>
+          )}
+        </AnimatePresence>
+
         <div className="w-full max-w-none p-4 sm:p-6 lg:p-12">
           {/* Active Tab Header (Optional, since it's in top bar now, but good for context) */}
           {activeTab !== 'staff' && (
             <div className="mb-8 flex items-center justify-between">
               <div>
-                <h1 className="text-3xl font-black text-gray-900 dark:text-white tracking-tight">
+                <h1 className="text-3xl font-black text-slate-900 tracking-tight">
                   {activeTab === 'dashboard' ? 'لوحة التحكم' : activeTab === 'daily-tasks' ? 'المهام اليومية' : activeTab}
                 </h1>
-                <p className="text-gray-500 dark:text-slate-400 font-medium mt-1">
+                <p className="text-slate-600 font-bold mt-1">
                   {activeTab === 'dashboard' ? 'نظرة عامة على أداء النظام والطلبات' : 'إدارة ومتابعة المهام المجدولة'}
                 </p>
               </div>
@@ -10180,27 +11357,27 @@ function AppContent() {
                 if (overdueUnpaid.length === 0) return null;
 
                 return (
-                  <div className="mb-8 p-6 bg-red-50/80 dark:bg-red-950/20 border border-red-100 dark:border-red-900/30 rounded-[2rem] shadow-sm">
+                  <div className="mb-8 p-6 bg-rose-50/90 border border-rose-200/80 rounded-[2rem] shadow-[0_4px_20px_-4px_rgba(244,63,94,0.08)]">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                      <div className="flex items-center gap-3">
-                        <div className="p-3 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-2xl">
+                      <div className="flex items-center gap-3.5">
+                        <div className="p-3 bg-rose-100 text-rose-600 rounded-2xl shadow-xs">
                           <BellRing size={24} className="animate-bounce" />
                         </div>
                         <div>
-                          <h3 className="font-cairo text-lg font-black text-red-800 dark:text-red-300">
+                          <h3 className="font-cairo text-lg font-black text-rose-950">
                             تنبيه: طلبات متأخرة لم يتم تحصيل قيمتها!
                           </h3>
-                          <p className="font-cairo text-sm font-bold text-red-700/80 dark:text-red-400/80 mt-0.5">
+                          <p className="font-cairo text-sm font-bold text-rose-800 mt-0.5">
                             يوجد {overdueUnpaid.length} طلب تجاوزت تاريخ الاستحقاق المطلوب وهي لا تزال غير مدفوعة.
                           </p>
                         </div>
                       </div>
                       
                       <motion.button
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
+                        whileHover={{ scale: 1.03 }}
+                        whileTap={{ scale: 0.97 }}
                         onClick={() => setIsOverduePanelExpanded(!isOverduePanelExpanded)}
-                        className="px-6 py-2.5 bg-red-600 hover:bg-red-700 dark:bg-red-800 dark:hover:bg-red-700 text-white font-black text-sm rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                        className="px-6 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-black text-sm rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-md shadow-rose-600/20"
                       >
                         {isOverduePanelExpanded ? 'إخفاء الطلبات المتأخرة' : 'عرض وتذكير العملاء بالواتس'}
                         <ChevronDown size={16} className={`transition-transform duration-200 ${isOverduePanelExpanded ? 'rotate-180' : ''}`} />
@@ -10216,13 +11393,13 @@ function AppContent() {
                           className="overflow-hidden mt-6 pt-6 border-t border-red-200/40 dark:border-red-900/40"
                         >
                           <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                            {overdueUnpaid.map((req) => {
+                            {overdueUnpaid.map((req, reqIdx) => {
                               const apt = apartments.find(a => a.buildingName === req.buildingName && a.number === req.apartmentNumber);
                               const tenant = apt ? tenants.find(t => t.id === apt.tenantId) : null;
                               const delayDays = differenceInDays(new Date(), safeToDate(req.date));
                               
                               return (
-                                <div key={req.id} className="p-4 bg-white dark:bg-slate-800/80 border border-gray-100 dark:border-slate-700/60 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm hover:shadow-md transition-all">
+                                <div key={`${req.id || 'overdue'}-${reqIdx}`} className="p-4 bg-white dark:bg-slate-800/80 border border-gray-100 dark:border-slate-700/60 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm hover:shadow-md transition-all">
                                   <div className="flex items-center gap-3">
                                     <div className="w-10 h-10 bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 rounded-xl flex items-center justify-center font-bold">
                                       {req.serviceType === 'تنظيف سيارات' ? <Car size={18} /> : <HomeIcon size={18} />}
@@ -10309,14 +11486,14 @@ function AppContent() {
 
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
                 <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-primary rounded-2xl flex items-center justify-center shadow-lg shadow-primary/20 dark:shadow-none">
+                  <div className="w-12 h-12 bg-[#0f172a] rounded-2xl flex items-center justify-center shadow-md shadow-slate-900/10">
                     <LayoutDashboard className="text-white" size={24} />
                   </div>
                   <div>
-                    <h2 className="font-cairo text-3xl font-black text-gray-900 dark:text-white tracking-tight">
+                    <h2 className="font-cairo text-3xl font-black text-slate-900 tracking-tight">
                       إحصائيات اليوم
                     </h2>
-                    <p className="font-cairo text-gray-500 dark:text-slate-400 font-bold mt-1">
+                    <p className="font-cairo text-slate-600 font-bold mt-1">
                       {format(new Date(), 'dd MMMM yyyy', { locale: ar })}
                     </p>
                   </div>
@@ -10328,7 +11505,7 @@ function AppContent() {
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
                       onClick={() => setIsActionsDropdownOpen(!isActionsDropdownOpen)}
-                      className="flex items-center gap-2 px-6 py-3 bg-slate-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-gray-200 dark:border-slate-700 rounded-2xl font-black text-sm shadow-sm transition-all focus:outline-none cursor-pointer"
+                      className="flex items-center gap-2 px-5 py-3 bg-white hover:bg-slate-50 text-slate-800 border border-slate-200/90 rounded-2xl font-black text-sm shadow-sm transition-all focus:outline-none cursor-pointer"
                     >
                       <ChevronDown size={18} className={`transition-transform duration-200 ${isActionsDropdownOpen ? 'rotate-180' : ''}`} />
                       <span>خيارات إضافية</span>
@@ -10340,14 +11517,14 @@ function AppContent() {
                           className="fixed inset-0 z-30" 
                           onClick={() => setIsActionsDropdownOpen(false)}
                         />
-                        <div className="absolute left-0 mt-2 w-56 bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl shadow-xl py-2 z-40 animate-in fade-in slide-in-from-top-2 duration-150">
+                        <div className="absolute left-0 mt-2 w-56 bg-white border border-slate-200/90 rounded-2xl shadow-xl py-2 z-40 animate-in fade-in slide-in-from-top-2 duration-150">
                           <button
                             onClick={() => {
                               setBulkPrintRequests(filteredRequests);
                               setIsPrintingBulk(true);
                               setIsActionsDropdownOpen(false);
                             }}
-                            className="w-full flex items-center justify-start gap-3 px-4 py-3 text-right text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-700/50 font-black text-sm transition-colors cursor-pointer"
+                            className="w-full flex items-center justify-start gap-3 px-4 py-3 text-right text-slate-700 hover:bg-slate-50 font-black text-sm transition-colors cursor-pointer"
                           >
                             <FileText size={18} className="text-primary" />
                             <span>طباعة فواتير</span>
@@ -10358,20 +11535,32 @@ function AppContent() {
                               setIsPrintingReport(true);
                               setIsActionsDropdownOpen(false);
                             }}
-                            className="w-full flex items-center justify-start gap-3 px-4 py-3 text-right text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-700/50 font-black text-sm transition-colors cursor-pointer"
+                            className="w-full flex items-center justify-start gap-3 px-4 py-3 text-right text-slate-700 hover:bg-slate-50 font-black text-sm transition-colors cursor-pointer"
                           >
-                            <Printer size={18} className="text-gray-500" />
+                            <Printer size={18} className="text-slate-500" />
                             <span>طباعة تقرير</span>
                           </button>
 
-                          <div className="border-t border-gray-100 dark:border-slate-700 my-1" />
+                          <button
+                            onClick={() => {
+                              setSelectedNorthAptForClaim(undefined);
+                              setIsNorthCleaningClaimModalOpen(true);
+                              setIsActionsDropdownOpen(false);
+                            }}
+                            className="w-full flex items-center justify-start gap-3 px-4 py-3 text-right text-emerald-600 hover:bg-emerald-50 font-black text-sm transition-colors cursor-pointer"
+                          >
+                            <ReceiptText size={18} />
+                            <span>مطالبة / إيصال نظافة نورث</span>
+                          </button>
+
+                          <div className="border-t border-gray-100 my-1" />
 
                           <button
                             onClick={() => {
                               setIsExportModalOpen(true);
                               setIsActionsDropdownOpen(false);
                             }}
-                            className="w-full flex items-center justify-start gap-3 px-4 py-3 text-right text-emerald-600 dark:text-emerald-400 hover:bg-gray-50 dark:hover:bg-slate-700/50 font-black text-sm transition-colors cursor-pointer"
+                            className="w-full flex items-center justify-start gap-3 px-4 py-3 text-right text-emerald-600 hover:bg-emerald-50 font-black text-sm transition-colors cursor-pointer"
                           >
                             <Download size={18} />
                             <span>تصدير البيانات</span>
@@ -10382,10 +11571,23 @@ function AppContent() {
                   </div>
                   
                   <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
+                    onClick={() => {
+                      setSelectedNorthAptForClaim(undefined);
+                      setIsNorthCleaningClaimModalOpen(true);
+                    }}
+                    className="flex items-center gap-2 px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-sm shadow-md shadow-emerald-600/15 transition-all cursor-pointer"
+                  >
+                    <ReceiptText size={18} />
+                    <span>إيصال / مطالبة نظافة نورث</span>
+                  </motion.button>
+
+                  <motion.button
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
                     onClick={() => setIsModalOpen(true)}
-                    className="flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-2xl font-black text-sm shadow-lg shadow-primary/20 dark:shadow-none transition-all"
+                    className="flex items-center gap-2 px-6 py-3 bg-[#0f172a] hover:bg-slate-800 text-white rounded-2xl font-black text-sm shadow-md shadow-slate-900/15 transition-all cursor-pointer"
                   >
                     <Plus size={18} />
                     طلب جديد
@@ -10399,7 +11601,8 @@ function AppContent() {
                   label: 'إجمالي الطلبات (شهرياً)', 
                   value: stats.total, 
                   icon: FileText, 
-                  color: 'primary', 
+                  badgeBg: 'bg-indigo-50 border border-indigo-150 text-indigo-600',
+                  trendBg: 'bg-indigo-50 text-indigo-700 border border-indigo-150',
                   trend: '+12%',
                   onClick: () => {
                     setPaymentFilter('all');
@@ -10412,8 +11615,9 @@ function AppContent() {
                   label: 'لم يتم الدفع (شقق)', 
                   value: stats.unpaidApartments, 
                   icon: AlertCircle, 
-                  color: 'primary', 
-                  trend: stats.unpaidApartments > 0 ? '+!' : '0',
+                  badgeBg: 'bg-rose-50 border border-rose-150 text-rose-600',
+                  trendBg: 'bg-rose-50 text-rose-700 border border-rose-150',
+                  trend: stats.unpaidApartments > 0 ? `+${stats.unpaidApartments}` : '0',
                   onClick: () => {
                     setPaymentFilter('unpaid');
                     setStatusFilter('all');
@@ -10425,8 +11629,9 @@ function AppContent() {
                   label: 'لم يتم الدفع (سيارات)', 
                   value: stats.unpaidCars, 
                   icon: Car, 
-                  color: 'primary', 
-                  trend: stats.unpaidCars > 0 ? '+!' : '0',
+                  badgeBg: 'bg-amber-50 border border-amber-150 text-amber-600',
+                  trendBg: 'bg-amber-50 text-amber-700 border border-amber-150',
+                  trend: stats.unpaidCars > 0 ? `+${stats.unpaidCars}` : '0',
                   onClick: () => {
                     setPaymentFilter('unpaid');
                     setStatusFilter('all');
@@ -10438,7 +11643,8 @@ function AppContent() {
                   label: 'طلبات منفذة (شهرياً)', 
                   value: stats.completed, 
                   icon: CheckCircle2, 
-                  color: 'primary', 
+                  badgeBg: 'bg-emerald-50 border border-emerald-150 text-emerald-600',
+                  trendBg: 'bg-emerald-50 text-emerald-700 border border-emerald-150',
                   trend: '+15%',
                   onClick: () => {
                     setPaymentFilter('all');
@@ -10451,7 +11657,8 @@ function AppContent() {
                   label: 'المبالغ المحصلة (شهرياً)', 
                   value: `${stats.paid} ريال`, 
                   icon: DollarSign, 
-                  color: 'emerald', 
+                  badgeBg: 'bg-teal-50 border border-teal-150 text-teal-600',
+                  trendBg: 'bg-teal-50 text-teal-700 border border-teal-150',
                   trend: '+8%',
                   onClick: () => {
                     setPaymentFilter('paid');
@@ -10469,30 +11676,27 @@ function AppContent() {
                   transition={{ delay: i * 0.1 }}
                   onClick={stat.onClick}
                   className={cn(
-                    "bg-box dark:bg-slate-900 p-5 sm:p-6 rounded-[2.5rem] shadow-sm border border-gray-100 dark:border-slate-800 hover:shadow-xl hover:shadow-primary/5 transition-all group",
+                    "bg-white/95 backdrop-blur-md p-5 sm:p-6 rounded-[2.2rem] shadow-[0_4px_25px_-5px_rgba(244,114,182,0.07),0_2px_10px_-2px_rgba(0,0,0,0.02)] border border-pink-100/70 hover:border-pink-200 hover:shadow-[0_8px_30px_-5px_rgba(244,114,182,0.14)] transition-all group",
                     stat.onClick && "cursor-pointer"
                   )}
                 >
                   <div className="flex justify-between items-start mb-4">
                     <div className={cn(
-                      "p-3 sm:p-4 rounded-2xl transition-transform group-hover:scale-110",
-                      stat.color === 'primary' ? "bg-primary/5 dark:bg-primary/20 text-primary" :
-                      stat.color === 'emerald' ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400" :
-                      stat.color === 'amber' ? "bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400" :
-                      "bg-primary/10 dark:bg-primary/20 text-primary"
+                      "p-3 sm:p-3.5 rounded-2xl transition-transform group-hover:scale-110 shadow-xs",
+                      stat.badgeBg
                     )}>
-                      <stat.icon size={20} className="sm:w-6 sm:h-6" />
+                      <stat.icon size={22} className="stroke-[2.2]" />
                     </div>
                     <span className={cn(
-                      "text-[10px] font-black px-2 py-1 rounded-lg",
-                      stat.trend.startsWith('+') ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20" : "bg-rose-50 text-rose-600 dark:bg-rose-900/20"
+                      "text-[11px] font-black px-2.5 py-1 rounded-lg",
+                      stat.trendBg
                     )}>
                       {stat.trend}
                     </span>
                   </div>
                   <div className="text-right">
-                    <p className="font-cairo text-[10px] sm:text-xs font-black text-gray-500 dark:text-slate-400 mb-1 uppercase tracking-wider truncate">{stat.label}</p>
-                    <p className="font-cairo text-lg sm:text-2xl font-black text-gray-900 dark:text-white tracking-tight">{stat.value}</p>
+                    <p className="font-cairo text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wide truncate">{stat.label}</p>
+                    <p className="font-cairo text-xl sm:text-2xl font-black text-slate-900 tracking-tight">{stat.value}</p>
                   </div>
                 </motion.div>
               ))}
@@ -10503,31 +11707,31 @@ function AppContent() {
               <motion.div 
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
-                className="bg-box dark:bg-slate-900 p-8 rounded-[3rem] border border-gray-100 dark:border-slate-800 shadow-sm relative overflow-hidden group"
+                className="bg-white/95 backdrop-blur-md p-8 rounded-[2.5rem] border border-pink-100/70 shadow-[0_4px_25px_-5px_rgba(244,114,182,0.07),0_2px_10px_-2px_rgba(0,0,0,0.02)] relative overflow-hidden group"
               >
-                <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full -mr-32 -mt-32 blur-3xl group-hover:bg-primary/10 transition-colors" />
+                <div className="absolute top-0 right-0 w-64 h-64 bg-teal-500/5 rounded-full -mr-32 -mt-32 blur-3xl group-hover:bg-teal-500/10 transition-colors" />
                 <div className="relative z-10">
-                  <h3 className="font-cairo text-xl font-black text-gray-900 dark:text-white mb-6 flex items-center gap-3">
-                    <div className="w-2 h-6 bg-primary rounded-full" />
+                  <h3 className="font-cairo text-xl font-black text-slate-900 mb-6 flex items-center gap-3">
+                    <div className="w-2.5 h-6 bg-teal-600 rounded-full" />
                     ملخص الأداء الشهري
                   </h3>
                   <div className="space-y-6">
                     {[
-                      { label: 'نسبة الإنجاز', value: Math.round((stats.completed / (stats.total || 1)) * 100), color: 'bg-primary' },
-                      { label: 'نسبة التحصيل', value: Math.round((stats.paidCount / (stats.total || 1)) * 100), color: 'bg-primary' },
-                      { label: 'الطلبات المتبقية', value: Math.round(((stats.total - stats.completed) / (stats.total || 1)) * 100), color: 'bg-amber-500' },
+                      { label: 'نسبة الإنجاز', value: Math.round((stats.completed / (stats.total || 1)) * 100), color: 'bg-gradient-to-l from-emerald-500 to-teal-400' },
+                      { label: 'نسبة التحصيل', value: Math.round((stats.paidCount / (stats.total || 1)) * 100), color: 'bg-gradient-to-l from-indigo-500 to-blue-400' },
+                      { label: 'الطلبات المتبقية', value: Math.round(((stats.total - stats.completed) / (stats.total || 1)) * 100), color: 'bg-gradient-to-l from-amber-500 to-orange-400' },
                     ].map((item, idx) => (
                       <div key={idx} className="space-y-2">
                         <div className="flex justify-between text-sm font-bold">
-                          <span className="font-cairo text-gray-500">{item.label}</span>
-                          <span className="text-primary">{item.value}%</span>
+                          <span className="font-cairo text-slate-700">{item.label}</span>
+                          <span className="font-black text-slate-900">{item.value}%</span>
                         </div>
-                        <div className="h-3 bg-gray-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                        <div className="h-3.5 bg-slate-100 rounded-full overflow-hidden p-0.5">
                           <motion.div 
                             initial={{ width: 0 }}
                             animate={{ width: `${item.value}%` }}
                             transition={{ duration: 1, delay: 0.5 + (idx * 0.2) }}
-                            className={cn("h-full rounded-full shadow-sm", item.color)}
+                            className={cn("h-full rounded-full shadow-xs", item.color)}
                           />
                         </div>
                       </div>
@@ -10539,21 +11743,21 @@ function AppContent() {
               <motion.div 
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
-                className="bg-slate-900 text-white p-8 rounded-[3rem] shadow-2xl relative overflow-hidden group"
+                className="bg-gradient-to-br from-[#0f172a] via-[#162038] to-[#1e293b] text-white p-8 rounded-[2.5rem] shadow-xl shadow-slate-900/10 border border-slate-800 relative overflow-hidden group"
               >
-                <div className="absolute bottom-0 left-0 w-64 h-64 bg-primary/20 rounded-full -ml-32 -mb-32 blur-3xl" />
+                <div className="absolute bottom-0 left-0 w-64 h-64 bg-teal-500/15 rounded-full -ml-32 -mb-32 blur-3xl" />
                 <div className="relative z-10 flex flex-col h-full justify-between">
                   <div>
-                    <h3 className="font-cairo text-xl font-black mb-2">إجمالي الإيرادات</h3>
-                    <p className="font-cairo text-white/60 font-bold text-sm mb-8">إجمالي المبالغ المحصلة خلال هذا الشهر</p>
+                    <h3 className="font-cairo text-xl font-black text-white mb-2">إجمالي الإيرادات</h3>
+                    <p className="font-cairo text-slate-300 font-bold text-sm mb-8">إجمالي المبالغ المحصلة خلال هذا الشهر</p>
                     <div className="flex items-baseline gap-3">
-                      <span className="text-5xl font-black tracking-tight">{stats.paid}</span>
-                      <span className="font-cairo text-xl font-bold opacity-60">ريال</span>
+                      <span className="text-5xl font-black tracking-tight text-white">{stats.paid}</span>
+                      <span className="font-cairo text-xl font-bold text-slate-300">ريال</span>
                     </div>
                   </div>
                   <div className="mt-8 pt-8 border-t border-white/10 flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <div className="bg-primary/20 p-2 rounded-xl">
+                      <div className="bg-emerald-500/20 border border-emerald-500/30 p-2 rounded-xl">
                         <TrendingUp className="text-emerald-400" size={20} />
                       </div>
                       <span className="font-cairo text-sm font-bold text-emerald-400">+12% عن الشهر الماضي</span>
@@ -10563,7 +11767,7 @@ function AppContent() {
                         setPaymentFilter('paid');
                         setViewMode('list');
                       }}
-                      className="p-3 bg-white/10 hover:bg-white/20 rounded-2xl transition-all"
+                      className="p-3 bg-white/10 hover:bg-white/20 text-white rounded-2xl transition-all cursor-pointer border border-white/10"
                     >
                       <ChevronLeft size={20} />
                     </button>
@@ -10704,22 +11908,22 @@ function AppContent() {
 
           {/* Top Bar: Month & Search */}
           {activeTab !== 'staff' && activeTab !== 'car-subscriptions' && (
-            <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 rounded-[2.5rem] p-6 sm:p-8 shadow-sm mb-10 space-y-6">
+            <div className="bg-white/95 backdrop-blur-md border border-pink-100/70 rounded-[2.5rem] p-6 sm:p-8 shadow-[0_4px_25px_-5px_rgba(244,114,182,0.07),0_2px_10px_-2px_rgba(0,0,0,0.02)] mb-10 space-y-6">
               {/* Row 1: Month navigation and Search */}
               <div className="flex flex-col xl:flex-row gap-4 items-stretch xl:items-center justify-between">
                 {/* Month Navigator */}
-                <div className="flex flex-wrap items-center gap-3 bg-gray-50 dark:bg-slate-800/30 p-2 rounded-3xl border border-gray-100/10 dark:border-slate-800/50 w-full xl:w-auto">
+                <div className="flex flex-wrap items-center gap-3 bg-slate-50/90 p-2 rounded-3xl border border-slate-200/80 w-full xl:w-auto">
                   <motion.button 
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                     onClick={() => setSelectedMonth(subMonths(selectedMonth, 1))}
-                    className="p-2 sm:p-2.5 bg-white dark:bg-slate-800 hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-600 dark:text-gray-400 rounded-2xl transition-all shadow-sm border border-gray-100 dark:border-slate-800"
+                    className="p-2 sm:p-2.5 bg-white hover:bg-slate-100 text-slate-700 rounded-2xl transition-all shadow-xs border border-slate-200/70 cursor-pointer"
                   >
                     <ChevronRight size={20} />
                   </motion.button>
-                  <div className="relative flex items-center gap-3 px-4 min-w-[160px] justify-center flex-1 sm:flex-initial cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800/50 rounded-2xl py-1 transition-all">
-                    <Calendar className="text-primary" size={20} />
-                    <span className="font-black text-base sm:text-lg text-gray-900 dark:text-white underline decoration-dotted decoration-primary/50 underline-offset-4">
+                  <div className="relative flex items-center gap-3 px-4 min-w-[160px] justify-center flex-1 sm:flex-initial cursor-pointer hover:bg-white rounded-2xl py-1 transition-all">
+                    <Calendar className="text-teal-600" size={20} />
+                    <span className="font-black text-base sm:text-lg text-slate-900 underline decoration-dotted decoration-teal-500/50 underline-offset-4">
                       {format(selectedMonth, 'MMMM yyyy', { locale: ar })}
                     </span>
                     <input 
@@ -10738,31 +11942,31 @@ function AppContent() {
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                     onClick={() => setSelectedMonth(addMonths(selectedMonth, 1))}
-                    className="p-2 sm:p-2.5 bg-white dark:bg-slate-800 hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-600 dark:text-gray-400 rounded-2xl transition-all shadow-sm border border-gray-100 dark:border-slate-800"
+                    className="p-2 sm:p-2.5 bg-white hover:bg-slate-100 text-slate-700 rounded-2xl transition-all shadow-xs border border-slate-200/70 cursor-pointer"
                   >
                     <ChevronLeft size={20} />
                   </motion.button>
                   
-                  <div className="hidden sm:block w-px h-8 bg-gray-200 dark:bg-slate-800 mx-1" />
+                  <div className="hidden sm:block w-px h-8 bg-slate-200 mx-1" />
                   
                   <motion.button 
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={duplicatePreviousMonthSchedule}
-                    className="flex items-center gap-2 px-4 py-2 hover:bg-primary/10 text-primary rounded-2xl transition-all font-black text-xs"
+                    className="flex items-center gap-2 px-4 py-2 hover:bg-white text-slate-700 hover:text-slate-900 rounded-2xl transition-all font-bold text-xs cursor-pointer"
                     title="نسخ جدول الشهر السابق"
                   >
                     <Repeat size={16} />
                     <span>نسخ جدول الشهر السابق</span>
                   </motion.button>
 
-                  <div className="hidden sm:block w-px h-8 bg-gray-200 dark:bg-slate-800 mx-1" />
+                  <div className="hidden sm:block w-px h-8 bg-slate-200 mx-1" />
 
                   <motion.button 
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={() => setIsMonthlyListModalOpen(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-2xl transition-all font-black text-xs shadow-md shadow-primary/10 hover:bg-primary/95"
+                    className="flex items-center gap-2 px-4 py-2 bg-[#0f172a] text-white rounded-2xl transition-all font-bold text-xs shadow-xs hover:bg-slate-800 cursor-pointer"
                     title="إضافة قائمة شهر جديد"
                   >
                     <Plus size={16} />
@@ -10772,7 +11976,7 @@ function AppContent() {
 
                 {/* Search Input Bar */}
                 <div className="flex-1 relative w-full xl:max-w-md">
-                  <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 font-bold" size={20} />
+                  <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold" size={20} />
                   <input 
                     type="text"
                     placeholder={
@@ -10780,7 +11984,7 @@ function AppContent() {
                         ? "البحث برقم اللوحة..." 
                         : "البحث برقم الشقة أو المبنى..."
                     }
-                    className="w-full pr-12 pl-12 py-3.5 bg-gray-50 dark:bg-slate-800/30 border border-gray-200 dark:border-slate-800 rounded-2xl focus:ring-4 focus:ring-primary/10 hover:border-gray-300 dark:hover:border-slate-700 outline-none transition-all font-black text-sm dark:text-white dark:placeholder-gray-600"
+                    className="w-full pr-12 pl-12 py-3.5 bg-slate-50/90 border border-slate-200/90 rounded-2xl focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 hover:border-slate-300 outline-none transition-all font-bold text-sm text-slate-900 placeholder:text-slate-400"
                     value={searchTerm}
                     onChange={e => setSearchTerm(e.target.value)}
                   />
@@ -10801,21 +12005,21 @@ function AppContent() {
               </div>
 
               {/* Row 2: Categorized Micro-filters */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-6 border-t border-gray-100 dark:border-slate-800">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-6 border-t border-slate-150/80">
                 {/* Service Filter */}
                 {(activeTab === 'dashboard' || activeTab === 'daily-tasks' || activeTab === 'تكرار الطلبات') ? (
                   <div className="flex flex-col gap-2">
-                    <span className="text-xs font-black text-gray-400 dark:text-slate-500 uppercase tracking-wider mr-2">فلتر الخدمات</span>
-                    <div className="flex bg-gray-50 dark:bg-slate-800/30 p-1.5 rounded-2xl border border-gray-200/50 dark:border-slate-800/50 h-fit">
+                    <span className="text-xs font-bold text-slate-700 uppercase tracking-wider mr-2">فلتر الخدمات</span>
+                    <div className="flex bg-slate-100/80 p-1.5 rounded-2xl border border-slate-200/70 h-fit">
                       <motion.button 
                         whileHover={{ scale: 1.01 }}
                         whileTap={{ scale: 0.99 }}
                         onClick={() => setServiceFilter('all')}
                         className={cn(
-                          "flex-1 py-2 rounded-xl font-black transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5",
+                          "flex-1 py-2 rounded-xl font-bold transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5 cursor-pointer",
                           serviceFilter === 'all' 
-                            ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm" 
-                            : "text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-slate-800/50"
+                            ? "bg-[#0f172a] text-white shadow-xs" 
+                            : "text-slate-600 hover:text-slate-900 hover:bg-white"
                         )}
                       >
                         الكل
@@ -10825,10 +12029,10 @@ function AppContent() {
                         whileTap={{ scale: 0.99 }}
                         onClick={() => setServiceFilter('apartments')}
                         className={cn(
-                          "flex-1 py-2 rounded-xl font-black transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5",
+                          "flex-1 py-2 rounded-xl font-bold transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5 cursor-pointer",
                           serviceFilter === 'apartments' 
-                            ? "bg-primary text-white shadow-md shadow-primary/10 dark:shadow-none" 
-                            : "text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-slate-800/50"
+                            ? "bg-teal-600 text-white shadow-xs" 
+                            : "text-slate-600 hover:text-slate-900 hover:bg-white"
                         )}
                       >
                         <Home size={14} />
@@ -10839,10 +12043,10 @@ function AppContent() {
                         whileTap={{ scale: 0.99 }}
                         onClick={() => setServiceFilter('cars')}
                         className={cn(
-                          "flex-1 py-2 rounded-xl font-black transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5",
+                          "flex-1 py-2 rounded-xl font-bold transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5 cursor-pointer",
                           serviceFilter === 'cars' 
-                            ? "bg-primary text-white shadow-md shadow-primary/10 dark:shadow-none" 
-                            : "text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-slate-800/50"
+                            ? "bg-indigo-600 text-white shadow-xs" 
+                            : "text-slate-600 hover:text-slate-900 hover:bg-white"
                         )}
                       >
                         <Car size={14} />
@@ -10856,17 +12060,17 @@ function AppContent() {
 
                 {/* Payment Filter */}
                 <div className="flex flex-col gap-2">
-                  <span className="text-xs font-black text-gray-400 dark:text-slate-500 uppercase tracking-wider mr-2">حالة الدفع</span>
-                  <div className="flex bg-gray-50 dark:bg-slate-800/30 p-1.5 rounded-2xl border border-gray-200/50 dark:border-slate-800/50 h-fit">
+                  <span className="text-xs font-bold text-slate-700 uppercase tracking-wider mr-2">حالة الدفع</span>
+                  <div className="flex bg-slate-100/80 p-1.5 rounded-2xl border border-slate-200/70 h-fit">
                     <motion.button 
                       whileHover={{ scale: 1.01 }}
                       whileTap={{ scale: 0.99 }}
                       onClick={() => setPaymentFilter('all')}
                       className={cn(
-                        "flex-1 py-2 rounded-xl font-black transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5",
+                        "flex-1 py-2 rounded-xl font-bold transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5 cursor-pointer",
                         paymentFilter === 'all' 
-                          ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm" 
-                          : "text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-slate-800/50"
+                          ? "bg-[#0f172a] text-white shadow-xs" 
+                          : "text-slate-600 hover:text-slate-900 hover:bg-white"
                       )}
                     >
                       الكل
@@ -10876,10 +12080,10 @@ function AppContent() {
                       whileTap={{ scale: 0.99 }}
                       onClick={() => setPaymentFilter('paid')}
                       className={cn(
-                        "flex-1 py-2 rounded-xl font-black transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5 text-emerald-600 dark:text-emerald-400",
+                        "flex-1 py-2 rounded-xl font-bold transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5 cursor-pointer",
                         paymentFilter === 'paid' 
-                          ? "bg-emerald-600 dark:bg-emerald-500 !text-white shadow-md shadow-emerald-500/10 dark:shadow-none" 
-                          : "hover:bg-white dark:hover:bg-slate-800/50"
+                          ? "bg-emerald-600 text-white shadow-xs" 
+                          : "text-slate-600 hover:text-emerald-700 hover:bg-white"
                       )}
                     >
                       <span className={cn("w-2 h-2 rounded-full block", paymentFilter === 'paid' ? "bg-white" : "bg-emerald-500")} />
@@ -10890,10 +12094,10 @@ function AppContent() {
                       whileTap={{ scale: 0.99 }}
                       onClick={() => setPaymentFilter('unpaid')}
                       className={cn(
-                        "flex-1 py-2 rounded-xl font-black transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5 text-rose-600 dark:text-rose-400",
+                        "flex-1 py-2 rounded-xl font-bold transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5 cursor-pointer",
                         paymentFilter === 'unpaid' 
-                          ? "bg-rose-600 dark:bg-rose-500 !text-white shadow-md shadow-rose-500/10 dark:shadow-none" 
-                          : "hover:bg-white dark:hover:bg-slate-800/50"
+                          ? "bg-rose-600 text-white shadow-xs" 
+                          : "text-slate-600 hover:text-rose-700 hover:bg-white"
                       )}
                     >
                       <span className={cn("w-2 h-2 rounded-full block", paymentFilter === 'unpaid' ? "bg-white" : "bg-rose-500")} />
@@ -10904,17 +12108,17 @@ function AppContent() {
 
                 {/* Status Filter */}
                 <div className="flex flex-col gap-2">
-                  <span className="text-xs font-black text-gray-400 dark:text-slate-500 uppercase tracking-wider mr-2">حالة التنفيذ</span>
-                  <div className="flex bg-gray-50 dark:bg-slate-800/30 p-1.5 rounded-2xl border border-gray-200/50 dark:border-slate-800/50 h-fit overflow-x-auto no-scrollbar">
+                  <span className="text-xs font-bold text-slate-700 uppercase tracking-wider mr-2">حالة التنفيذ</span>
+                  <div className="flex bg-slate-100/80 p-1.5 rounded-2xl border border-slate-200/70 h-fit overflow-x-auto no-scrollbar">
                     <motion.button 
                       whileHover={{ scale: 1.01 }}
                       whileTap={{ scale: 0.99 }}
                       onClick={() => setStatusFilter('all')}
                       className={cn(
-                        "flex-1 py-2 rounded-xl font-black transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5",
+                        "flex-1 py-2 rounded-xl font-bold transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5 cursor-pointer",
                         statusFilter === 'all' 
-                          ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm" 
-                          : "text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-slate-800/50"
+                          ? "bg-[#0f172a] text-white shadow-xs" 
+                          : "text-slate-600 hover:text-slate-900 hover:bg-white"
                       )}
                     >
                       الكل
@@ -10924,13 +12128,13 @@ function AppContent() {
                       whileTap={{ scale: 0.99 }}
                       onClick={() => setStatusFilter('completed')}
                       className={cn(
-                        "flex-1 py-2 rounded-xl font-black transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5 text-blue-600 dark:text-blue-400",
+                        "flex-1 py-2 rounded-xl font-bold transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5 cursor-pointer",
                         statusFilter === 'completed' 
-                          ? "bg-primary !text-white shadow-md shadow-primary/10 dark:shadow-none" 
-                          : "hover:bg-white dark:hover:bg-slate-800/50"
+                          ? "bg-emerald-600 text-white shadow-xs" 
+                          : "text-slate-600 hover:text-emerald-700 hover:bg-white"
                       )}
                     >
-                      <span className={cn("w-2 h-2 rounded-full block", statusFilter === 'completed' ? "bg-white" : "bg-blue-500")} />
+                      <span className={cn("w-2 h-2 rounded-full block", statusFilter === 'completed' ? "bg-white" : "bg-emerald-500")} />
                       منفذة
                     </motion.button>
                     <motion.button 
@@ -10938,10 +12142,10 @@ function AppContent() {
                       whileTap={{ scale: 0.99 }}
                       onClick={() => setStatusFilter('pending')}
                       className={cn(
-                        "flex-1 py-2 rounded-xl font-black transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5 text-amber-600 dark:text-amber-400",
+                        "flex-1 py-2 rounded-xl font-bold transition-all text-xs whitespace-nowrap flex items-center justify-center gap-1.5 cursor-pointer",
                         statusFilter === 'pending' 
-                          ? "bg-amber-500 border border-amber-200 !text-white shadow-sm" 
-                          : "hover:bg-white dark:hover:bg-slate-800/50"
+                          ? "bg-amber-500 text-white shadow-xs" 
+                          : "text-slate-600 hover:text-amber-700 hover:bg-white"
                       )}
                     >
                       <span className={cn("w-2 h-2 rounded-full block", statusFilter === 'pending' ? "bg-white animate-pulse" : "bg-amber-500")} />
@@ -11048,9 +12252,9 @@ function AppContent() {
                   >
                     <p className="text-xs font-black uppercase tracking-widest opacity-60 mb-4">السيارات المتبقية:</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {incompleteRequests.map(req => (
+                      {incompleteRequests.map((req, reqIdx) => (
                         <div 
-                          key={req.id}
+                          key={`${req.id || 'inc'}-${reqIdx}`}
                           className="bg-white/40 dark:bg-black/20 backdrop-blur-sm p-4 rounded-2xl border border-orange-200/50 dark:border-orange-900/30 flex items-center justify-between group"
                         >
                           <div className="flex items-center gap-3">
@@ -11158,9 +12362,9 @@ function AppContent() {
                       </div>
                       <div className="space-y-4">
                         {dayRequests.length > 0 ? (
-                          dayRequests.slice(0, 3).map(req => (
+                          dayRequests.slice(0, 3).map((req, reqIdx) => (
                             <div 
-                              key={req.id} 
+                              key={`${req.id || 'day'}-${reqIdx}`} 
                               onClick={() => {
                                 setEditingRequest(req);
                                 setIsModalOpen(true);
@@ -11597,12 +12801,12 @@ function AppContent() {
 
               <div id="maintenance-schedule" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {filteredRequests
-                  .map((req) => (
+                  .map((req, reqIdx) => (
                     <motion.div 
                       layout
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
-                      key={req.id}
+                      key={`${req.id || 'req'}-${reqIdx}`}
                       className="bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-gray-100 dark:border-slate-800 shadow-sm hover:shadow-xl transition-all group"
                     >
                       <div className="flex justify-between items-start mb-6">
@@ -11899,11 +13103,11 @@ function AppContent() {
                       </thead>
                       <tbody className="divide-y divide-gray-50 dark:divide-slate-800">
                         {filteredRequests
-                          .map(request => (
+                          .map((request, reqIdx) => (
                             <motion.tr 
                               initial={{ opacity: 0 }}
                               animate={{ opacity: 1 }}
-                              key={request.id} 
+                              key={`${request.id || 'req'}-${reqIdx}`} 
                               className="group hover:bg-gray-50/50 dark:hover:bg-slate-800/50 transition-colors text-center"
                             >
                               <td className="py-4 px-4">
@@ -12031,9 +13235,9 @@ function AppContent() {
                                 )}
                               </div>
                               <div className="space-y-1">
-                                {dayRequests.slice(0, 2).map(req => (
+                                {dayRequests.slice(0, 2).map((req, reqIdx) => (
                                   <div 
-                                    key={req.id}
+                                    key={`${req.id || 'day'}-${reqIdx}`}
                                     onClick={() => {
                                       setEditingRequest(req);
                                       setIsModalOpen(true);
@@ -12259,8 +13463,6 @@ function AppContent() {
                                     { id: 'تكرار الطلبات', label: 'تكرار الطلبات' },
                                     { id: 'staff', label: 'إدارة العمالة' },
                                     { id: 'club-subscriptions', label: 'اشتراكات النادي' },
-                                    { id: 'game-room-bookings', label: 'حجز غرفة الألعاب' },
-                                    { id: 'bookings', label: 'إدارة الحجوزات' },
                                     { id: 'طلبات الماء', label: 'إدارة المياه والمخزون' },
                                     { id: 'طلبات الصيانة', label: 'طلبات الصيانة' },
                                     { id: 'تنظيف سيارات', label: 'تنظيف السيارات' },
@@ -13620,63 +14822,133 @@ function AppContent() {
           )}
 
           {activeTab === 'tenants' && (
+            <div className="mb-10">
+              <ContractsEjarView
+                tenants={tenants}
+                apartments={apartments}
+                propertyBuildings={PROPERTY_BUILDINGS}
+                onOpenNewContractModal={() => {
+                  setEditingTenant(null);
+                  setTenantForm({
+                    name: '',
+                    nationality: '',
+                    phone: '',
+                    company: '',
+                    idNumber: '',
+                    contractValue: 0,
+                    collectedAmount: 0,
+                    paymentFrequency: 'monthly',
+                    paymentMethod: 'cash',
+                    status: 'active'
+                  } as any);
+                  setIsTenantModalOpen(true);
+                }}
+                onOpenContractDetails={(t) => {
+                  setSelectedTenantForPayments(t);
+                  setIsPaymentModalOpen(true);
+                }}
+                onOpenPaymentsModal={(t) => {
+                  setSelectedTenantForPayments(t);
+                  setIsPaymentModalOpen(true);
+                }}
+                onEditContract={(t) => {
+                  setEditingTenant(t);
+                  setTenantForm({ ...t });
+                  setIsTenantModalOpen(true);
+                }}
+                onDeleteContract={(id) => deleteTenant(id)}
+                onSyncNewSheet={() => handleReplaceAllTenantsWithNewSheet(true)}
+                isSyncing={isReplacingTenants}
+                onExportExcel={() => {
+                  const fields = [
+                    { id: 'name', label: 'اسم المستأجر' },
+                    { id: 'phone', label: 'الجوال' },
+                    { id: 'nationality', label: 'الجنسية' },
+                    { id: 'idNumber', label: 'رقم الهوية' },
+                    { id: 'company', label: 'الجهة/الشركة' },
+                    { id: 'contractValue', label: 'قيمة العقد' },
+                    { id: 'collectedAmount', label: 'المبلغ المحصل' },
+                    { id: 'paymentFrequency', label: 'طريقة الدفع/التكرار' },
+                    { id: 'paymentMethod', label: 'وسيلة الدفع' },
+                    { id: 'startDate', label: 'بداية العقد' },
+                    { id: 'endDate', label: 'نهاية العقد' }
+                  ];
+                  exportAnyToExcel(tenants, fields, 'tenants_contracts');
+                }}
+                onOpenPriceQuotation={() => setActiveTab('quotations')}
+                safeToDate={safeToDate}
+              />
+            </div>
+          )}
+
+          {activeTab === 'quotations' && (
+            <div className="mb-10">
+              <PriceQuotationView
+                apartments={apartments}
+                tenants={tenants}
+                propertyBuildings={PROPERTY_BUILDINGS}
+                onConvertToContract={(quotation) => {
+                  setEditingTenant(null);
+                  setTenantForm({
+                    name: quotation.clientName,
+                    nationality: '',
+                    phone: quotation.clientPhone,
+                    company: quotation.clientCompany || '',
+                    idNumber: quotation.clientIdNumber || '',
+                    contractValue: quotation.annualRent,
+                    collectedAmount: 0,
+                    paymentFrequency: quotation.paymentFrequency,
+                    paymentMethod: 'cash',
+                    buildingName: quotation.buildingName,
+                    apartmentId: quotation.apartmentId,
+                    aptNumber: quotation.apartmentNumber,
+                    status: 'active'
+                  } as any);
+                  setIsTenantModalOpen(true);
+                  setActiveTab('tenants');
+                }}
+                onBackToContracts={() => setActiveTab('tenants')}
+                safeToDate={safeToDate}
+              />
+            </div>
+          )}
+
+          {activeTab === 'طلبات الصيانة' && (
+            <div className="mb-10">
+              <MaintenanceSpeechView
+                requests={requests}
+                apartments={apartments}
+                tenants={tenants}
+                onSaveRequest={saveRequest}
+                onUpdateStatus={updateStatus}
+                onDeleteRequest={async (id) => {
+                  try {
+                    await deleteDoc(doc(db, 'requests', id));
+                    toast.success('تم حذف طلب الصيانة');
+                  } catch (e) {
+                    toast.error('حدث خطأ أثناء الحذف');
+                  }
+                }}
+                safeToDate={safeToDate}
+                currentUser={user}
+              />
+            </div>
+          )}
+
+          {false && (
             <div className="space-y-8 mb-10">
-              {/* Statistics Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-                {[
-                  { label: 'إجمالي الوحدات', value: apartments.length || 150, icon: Home, color: 'slate' },
-                  { label: 'المؤجرة', value: tenants.length, icon: Users, color: 'blue' },
-                  { label: 'الشاغرة', value: apartments.filter(a => a.status === 'vacant').length, icon: AlertCircle, color: 'amber' },
-                  { label: 'غرفة وصالة', value: apartments.filter(a => a.roomType === 'غرفة و صالة').length, icon: Layout, color: 'slate' },
-                  { label: 'غرفتين وصالة', value: apartments.filter(a => a.roomType === 'غرفتين و صالة').length, icon: LayoutDashboard, color: 'slate' },
-                  { label: 'نسبة الإشغال', value: `${apartments.length > 0 ? Math.round((tenants.length / apartments.length) * 100) : 0}%`, icon: PieChart, color: 'blue' },
-                ].map((stat, i) => (
-                  <motion.div
-                    key={i}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.05 }}
-                    className="bg-white dark:bg-slate-900 p-5 rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm flex items-center gap-4 hover:shadow-md transition-all cursor-pointer group"
-                  >
-                    <div className={cn(
-                      "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-105",
-                      stat.color === 'slate' ? "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400" :
-                      stat.color === 'blue' ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400" :
-                      stat.color === 'amber' ? "bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400" :
-                      "bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-400"
-                    )}>
-                      <stat.icon size={22} />
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-tight leading-none mb-1">{stat.label}</p>
-                      <h3 className="text-lg font-black text-slate-900 dark:text-white leading-none">{stat.value}</h3>
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-
               <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-8 border border-gray-100 dark:border-slate-800 shadow-sm">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
-                <div className="flex items-center gap-5">
-                  <div className="w-16 h-16 bg-primary rounded-[1.5rem] flex items-center justify-center shadow-xl shadow-primary/20 dark:shadow-none">
-                    <Users className="text-white" size={32} />
-                  </div>
-                  <div>
-                    <h2 className="text-4xl font-black text-gray-900 dark:text-white tracking-tight">إدارة العقود</h2>
-                    <p className="text-gray-500 dark:text-slate-400 font-bold mt-1">قائمة بجميع العقود الحالية وتفاصيل المستأجرين</p>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-4">
-                  <div className="flex bg-gray-200 dark:bg-slate-800 p-1.5 rounded-[1.5rem] font-cairo">
-                    <button 
-                      onClick={() => setTenantFilter('active')}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+                  <div className="flex flex-wrap items-center gap-4">
+                    <div className="flex bg-gray-200 dark:bg-slate-800 p-1.5 rounded-[1.5rem] font-cairo">
+                      <button 
+                        onClick={() => setTenantFilter('active')}
                       className={cn(
                         "px-8 py-3 rounded-2xl font-black text-xs transition-all",
                         tenantFilter === 'active' ? "bg-white dark:bg-slate-700 text-primary shadow-lg shadow-gray-200/50" : "text-gray-500 hover:text-gray-700"
                       )}
                     >
-                      العقود النشطة
+                      العقود النشطة ({tenants.filter(t => (t.status || 'active') === 'active').length})
                     </button>
                     <button 
                       onClick={() => setTenantFilter('archived')}
@@ -13685,9 +14957,22 @@ function AppContent() {
                         tenantFilter === 'archived' ? "bg-white dark:bg-slate-700 text-rose-500 shadow-lg shadow-gray-200/50" : "text-gray-500 hover:text-gray-700"
                       )}
                     >
-                      الأرشيف
+                      الأرشيف ({tenants.filter(t => t.status === 'archived').length})
                     </button>
                   </div>
+
+                  <motion.button
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
+                    onClick={() => handleReplaceAllTenantsWithNewSheet(true)}
+                    disabled={isReplacingTenants}
+                    className="flex items-center gap-2 px-6 py-4 bg-rose-600 hover:bg-rose-700 text-white rounded-[2rem] font-black text-sm shadow-xl shadow-rose-600/20 transition-all font-cairo cursor-pointer disabled:opacity-50"
+                    title="حذف البيانات السابقة واستبدالها ببيانات الجدول الجديد (117 عقد و 139 وحدة)"
+                  >
+                    <RefreshCw size={18} className={isReplacingTenants ? 'animate-spin' : ''} />
+                    <span>{isReplacingTenants ? 'جاري الاستبدال...' : 'استبدال بالجدول الجديد (117 عقد) 🔄'}</span>
+                  </motion.button>
+
                   <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
@@ -13707,7 +14992,7 @@ function AppContent() {
                       } as any);
                       setIsTenantModalOpen(true);
                     }}
-                    className="flex items-center gap-3 px-8 py-4 bg-primary text-white rounded-[2rem] font-black text-sm shadow-xl shadow-primary/20 hover:bg-primary/90 transition-all font-cairo"
+                    className="flex items-center gap-3 px-8 py-4 bg-primary text-white rounded-[2rem] font-black text-sm shadow-xl shadow-primary/20 hover:bg-primary/90 transition-all font-cairo cursor-pointer"
                   >
                     <Plus size={20} />
                     <span>إضافة عقد جديد</span>
@@ -13875,8 +15160,13 @@ function AppContent() {
                           return 0;
                         })
                         .map((tenant) => {
-                        const apt = apartments.find(a => a.id === tenant.apartmentId);
-                        const building = PROPERTY_BUILDINGS.find(b => b.id === apt?.buildingId);
+                        const apt = apartments.find(a => a.id === tenant.apartmentId || a.number === tenant.apartmentId || a.number === (tenant as any).apartmentNumber);
+                        const aptNum = apt?.number || (tenant as any).apartmentNumber || tenant.apartmentId?.split('-').pop() || tenant.apartmentId;
+                        const building = PROPERTY_BUILDINGS.find(b => b.id === apt?.buildingId) || 
+                          (aptNum.startsWith('1') ? PROPERTY_BUILDINGS[0] :
+                           aptNum.startsWith('2') ? PROPERTY_BUILDINGS[1] :
+                           aptNum.startsWith('3') ? PROPERTY_BUILDINGS[2] :
+                           aptNum.startsWith('4') ? PROPERTY_BUILDINGS[3] : PROPERTY_BUILDINGS[4]);
                         const daysLeft = differenceInDays(safeToDate(tenant.endDate), new Date());
                         const collected = tenant.collectedAmount || 0;
                         const value = tenant.contractValue || 1;
@@ -13894,14 +15184,34 @@ function AppContent() {
                               <div className="flex items-center gap-6 justify-end">
                                 <div className="text-right">
                                   <div className="font-black text-gray-900 dark:text-white text-xl leading-tight group-hover:text-primary transition-colors">{tenant.name}</div>
-                                  <div className="text-[12px] font-bold text-gray-400 mt-2 flex items-center gap-2 justify-end">
-                                    <Phone size={14} className="text-slate-300" />
-                                    <span>{tenant.phone}</span>
-                                    <span className="opacity-30 mx-1">•</span>
-                                    <div className="w-5 h-5 bg-primary/10 rounded-md flex items-center justify-center text-primary">
-                                      <Sparkles size={10} />
-                                    </div>
+                                  <div className="flex items-center gap-1.5 flex-wrap justify-end mt-1.5">
+                                    {tenant.nationality && (
+                                      <span className="text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded-md">
+                                        {tenant.nationality}
+                                      </span>
+                                    )}
+                                    {tenant.company && (
+                                      <span className="text-[10px] font-bold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-md">
+                                        {tenant.company}
+                                      </span>
+                                    )}
+                                    {tenant.duration && (
+                                      <span className="text-[10px] font-bold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded-md">
+                                        {tenant.duration}
+                                      </span>
+                                    )}
+                                    {(tenant as any).roomType && (
+                                      <span className="text-[10px] font-bold bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 px-2 py-0.5 rounded-md">
+                                        {(tenant as any).roomType}
+                                      </span>
+                                    )}
                                   </div>
+                                  {tenant.phone && (
+                                    <div className="text-[12px] font-bold text-gray-400 mt-1.5 flex items-center gap-2 justify-end">
+                                      <Phone size={13} className="text-slate-300" />
+                                      <span>{tenant.phone}</span>
+                                    </div>
+                                  )}
                                 </div>
                                 <div className="w-16 h-16 bg-blue-50 dark:bg-blue-900/20 rounded-2xl flex items-center justify-center text-primary font-black text-2xl shadow-sm border border-blue-100/50 dark:border-blue-900/30">
                                   {tenant.name.charAt(0)}
@@ -13909,9 +15219,9 @@ function AppContent() {
                               </div>
                             </td>
                             <td className="px-6 py-6">
-                              <div className="flex flex-col gap-2 items-end">
-                                <div className="text-lg font-black text-gray-900 dark:text-white">شقة {apt?.number}</div>
-                                <div className="text-[10px] font-black text-primary bg-primary/5 px-4 py-1.5 rounded-xl border border-primary/10 tracking-[0.1em]">{building?.name || 'مبنى'}</div>
+                              <div className="flex flex-col gap-1 items-end">
+                                <div className="text-lg font-black text-gray-900 dark:text-white">شقة {aptNum}</div>
+                                <div className="text-[10px] font-black text-primary bg-primary/5 px-3 py-1 rounded-xl border border-primary/10 tracking-[0.1em]">{building?.name || 'مبنى'}</div>
                               </div>
                             </td>
                             <td className="px-6 py-8">
@@ -13945,14 +15255,20 @@ function AppContent() {
                               </div>
                             </td>
                             <td className="px-6 py-8">
-                              <div className="space-y-1.5">
-                                <div className="flex items-center gap-2 text-[11px] font-bold text-gray-500 bg-gray-50 dark:bg-slate-800 px-2.5 py-1.5 rounded-xl border border-gray-100 dark:border-slate-700 w-fit">
+                              <div className="space-y-1.5 text-xs">
+                                <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-500 bg-gray-50 dark:bg-slate-800 px-2.5 py-1 rounded-xl border border-gray-100 dark:border-slate-700 w-fit" title="تاريخ البداية">
                                   <Calendar size={12} className="opacity-50" />
-                                  <span>{format(safeToDate(tenant.startDate), 'yyyy/MM/dd')}</span>
+                                  <span>البداية: {format(safeToDate(tenant.startDate), 'yyyy/MM/dd')}</span>
                                 </div>
-                                <div className="flex items-center gap-2 text-[11px] font-bold text-rose-500 bg-rose-50 dark:bg-rose-900/10 px-2.5 py-1.5 rounded-xl border border-rose-100 dark:border-rose-900/20 w-fit">
+                                {tenant.nextPaymentDate && (
+                                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/40 px-2.5 py-1 rounded-xl border border-amber-200 dark:border-amber-800/50 w-fit" title="استحقاق الدفعة القادمة">
+                                    <Clock size={12} className="opacity-70" />
+                                    <span>الدفعة: {format(safeToDate(tenant.nextPaymentDate), 'yyyy/MM/dd')}</span>
+                                  </div>
+                                )}
+                                <div className="flex items-center gap-1.5 text-[11px] font-bold text-rose-500 bg-rose-50 dark:bg-rose-900/10 px-2.5 py-1 rounded-xl border border-rose-100 dark:border-rose-900/20 w-fit" title="تاريخ النهاية">
                                   <Calendar size={12} className="opacity-50" />
-                                  <span>{format(safeToDate(tenant.endDate), 'yyyy/MM/dd')}</span>
+                                  <span>النهاية: {format(safeToDate(tenant.endDate), 'yyyy/MM/dd')}</span>
                                 </div>
                               </div>
                             </td>
@@ -14102,135 +15418,908 @@ function AppContent() {
           )}
 
 
-          {/* Today's Car Cleaning Alerts */}
+          {/* Car Cleaning Follow-up & Daily Schedule Center (تنظيف السيارات) */}
           {activeTab === 'تنظيف سيارات' && activeTab !== 'staff' && (
             <div className="mb-10 space-y-6">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-primary rounded-2xl flex items-center justify-center shadow-lg shadow-primary/20 dark:shadow-none">
-                    <Car className="text-white" size={24} />
+              
+              {/* 1. Header Bar with Direct Link to Subscriptions Table */}
+              <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/80 dark:border-slate-800 rounded-[2.5rem] p-6 sm:p-8 shadow-sm">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                  <div className="flex items-center gap-4">
+                    <div className="w-14 h-14 bg-gradient-to-tr from-indigo-600 to-indigo-500 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-500/20 text-white shrink-0">
+                      <Car size={28} />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                          تنظيف السيارات — المتابعة اليومية
+                        </h2>
+                        <span className="px-3 py-1 bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 text-xs font-black rounded-xl border border-emerald-200 dark:border-emerald-800/60 flex items-center gap-1">
+                          <CheckCircle2 size={13} className="text-emerald-600 dark:text-emerald-400" />
+                          <span>مربوط بجدول الاشتراكات ({activeCarSubscriptionsForSelectedMonth.length} اشتراك لشهر {format(selectedMonth, 'MMMM')})</span>
+                        </span>
+                      </div>
+                      <p className="text-slate-500 dark:text-slate-400 font-bold text-xs sm:text-sm mt-1">
+                        متابعة يومية دقيقة لغسيل سيارات المشتركين بحسب أيام جدولهم، تسجيل إنجاز اليوم، وإرسال إشعارات الواتساب
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">
-                      جدول غسيل السيارات (المهام اليومية)
-                    </h2>
-                    <p className="text-gray-500 dark:text-slate-400 font-bold mt-1">
-                      {format(globalSelectedDate, 'dd MMMM yyyy', { locale: ar })}
-                    </p>
+
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setCarViewTab('sheet')}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-2xl font-black text-xs border border-indigo-200 dark:border-indigo-800 transition-all cursor-pointer shadow-xs"
+                      title="عرض جدول إكسيل لاشتراكات هذا الشهر"
+                    >
+                      <CalendarPlus size={16} />
+                      <span>جدول اشتراكات الشهر 📊</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const dateStr = format(globalSelectedDate, 'yyyy-MM-dd');
+                        const pending = carCleaningDailyRequests.filter(req => !(req.completedDates || []).includes(dateStr));
+                        if (pending.length === 0) {
+                          toast.info('جميع سيارات اليوم محددة كمكتملة بالفعل');
+                          return;
+                        }
+                        const loadId = toast.loading(`جاري تحديد ${pending.length} سيارة كمكتملة...`);
+                        try {
+                          for (const req of pending) {
+                            await toggleDailyCompletion(req, globalSelectedDate);
+                          }
+                          toast.dismiss(loadId);
+                          toast.success(`تم تحديد ${pending.length} سيارة كمكتملة بنجاح لهذا اليوم!`);
+                        } catch (e) {
+                          toast.dismiss(loadId);
+                          toast.error('حدث خطأ أثناء التحديث');
+                        }
+                      }}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-xs shadow-md shadow-emerald-500/20 transition-all cursor-pointer"
+                    >
+                      <CheckCircle2 size={16} />
+                      <span>تحديد الكل كمكتمل لليوم ✓</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => window.print()}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-2xl font-black text-xs border border-slate-200 dark:border-slate-700 transition-all cursor-pointer"
+                    >
+                      <Printer size={15} />
+                      <span>طباعة الكشف 🖨️</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsDeleteAllCarsModalOpen(true)}
+                      disabled={mergedAllCarRequests.length === 0}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 rounded-2xl font-black text-xs border border-rose-200 dark:border-rose-800/60 transition-all cursor-pointer shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="حذف جميع اشتراكات وطلبات تنظيف السيارات"
+                    >
+                      <Trash2 size={15} />
+                      <span>حذف الكل 🗑️</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Month Selector & Month Isolation Bar */}
+                <div className="mt-5 p-4 rounded-3xl bg-gradient-to-r from-indigo-50/90 via-slate-50 to-purple-50/80 dark:from-indigo-950/40 dark:via-slate-900 dark:to-purple-950/40 border border-indigo-200/80 dark:border-indigo-900/60 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-indigo-500/20">
+                      <Calendar size={20} />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-slate-500 dark:text-slate-400">الشهر المعروض:</span>
+                        <span className="text-base font-black text-indigo-700 dark:text-indigo-400 bg-indigo-100/70 dark:bg-indigo-900/60 px-3 py-0.5 rounded-xl">
+                          {format(selectedMonth, 'MMMM yyyy', { locale: ar })}
+                        </span>
+                        <span className="text-[11px] font-black bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 px-2.5 py-0.5 rounded-xl border border-emerald-300 dark:border-emerald-700">
+                          ✓ كل شهر منفصل تماماً
+                        </span>
+                      </div>
+                      <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 mt-0.5">
+                        {activeCarSubscriptionsForSelectedMonth.length} سيارة نشطة • {activeCarSubscriptionsForSelectedMonth.length * 8} غسلة شهرياً • {activeCarSubscriptionsForSelectedMonth.reduce((s, r) => s + (r.price || 0), 0).toLocaleString()} ر.س إجمالي الشهر
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Month Buttons and Stepper */}
+                  <div className="flex items-center gap-2 flex-wrap self-start md:self-auto">
+                    {/* Quick Month Tabs */}
+                    <div className="flex items-center gap-1 bg-white dark:bg-slate-800 p-1 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xs">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const oct = new Date(2026, 9, 1);
+                          setSelectedMonth(oct);
+                          setGlobalSelectedDate(oct);
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                          format(selectedMonth, 'yyyy-MM') === '2026-10'
+                            ? 'bg-indigo-600 text-white shadow-xs'
+                            : 'text-slate-700 dark:text-slate-300 hover:text-indigo-600'
+                        }`}
+                      >
+                        أكتوبر 2026
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nov = new Date(2026, 10, 1);
+                          setSelectedMonth(nov);
+                          setGlobalSelectedDate(nov);
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                          format(selectedMonth, 'yyyy-MM') === '2026-11'
+                            ? 'bg-indigo-600 text-white shadow-xs'
+                            : 'text-slate-700 dark:text-slate-300 hover:text-indigo-600'
+                        }`}
+                      >
+                        نوفمبر 2026
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const dec = new Date(2026, 11, 1);
+                          setSelectedMonth(dec);
+                          setGlobalSelectedDate(dec);
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                          format(selectedMonth, 'yyyy-MM') === '2026-12'
+                            ? 'bg-indigo-600 text-white shadow-xs'
+                            : 'text-slate-700 dark:text-slate-300 hover:text-indigo-600'
+                        }`}
+                      >
+                        ديسمبر 2026
+                      </button>
+                    </div>
+
+                    {/* Month Stepper */}
+                    <div className="flex items-center gap-1 bg-white dark:bg-slate-800 p-1 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xs">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const prev = subMonths(selectedMonth, 1);
+                          setSelectedMonth(prev);
+                          setGlobalSelectedDate(prev);
+                        }}
+                        className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-all text-slate-700 dark:text-slate-300 cursor-pointer"
+                        title="الشهر السابق"
+                      >
+                        <ChevronRight size={17} />
+                      </button>
+                      
+                      <div className="relative px-2.5 py-0.5 cursor-pointer">
+                        <span className="text-xs font-black text-slate-900 dark:text-white">
+                          {format(selectedMonth, 'MM/yyyy')}
+                        </span>
+                        <input
+                          type="month"
+                          value={format(selectedMonth, 'yyyy-MM')}
+                          onChange={(e) => {
+                            if (e.target.value) {
+                              const [y, m] = e.target.value.split('-').map(Number);
+                              const targetDate = new Date(y, m - 1, 1);
+                              setSelectedMonth(targetDate);
+                              setGlobalSelectedDate(targetDate);
+                            }
+                          }}
+                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = addMonths(selectedMonth, 1);
+                          setSelectedMonth(next);
+                          setGlobalSelectedDate(next);
+                        }}
+                        className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-all text-slate-700 dark:text-slate-300 cursor-pointer"
+                        title="الشهر التالي"
+                      >
+                        <ChevronLeft size={17} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Interactive Date Navigation Bar & View Tabs */}
+                <div className="mt-5 pt-5 border-t border-slate-150 dark:border-slate-800 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+                  
+                  {/* Date Controls */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setGlobalSelectedDate(subDays(globalSelectedDate, 1))}
+                      className="p-2.5 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-2xl border border-slate-200 dark:border-slate-700 transition-all cursor-pointer"
+                      title="اليوم السابق"
+                    >
+                      <ChevronRight size={18} />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setGlobalSelectedDate(new Date())}
+                      className="px-4 py-2 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 text-indigo-700 dark:text-indigo-300 rounded-2xl font-black text-xs border border-indigo-200 dark:border-indigo-800/60 transition-all cursor-pointer flex items-center gap-1.5"
+                    >
+                      <Sparkles size={14} />
+                      <span>اليوم</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setGlobalSelectedDate(addDays(globalSelectedDate, 1))}
+                      className="p-2.5 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-2xl border border-slate-200 dark:border-slate-700 transition-all cursor-pointer"
+                      title="اليوم التالي"
+                    >
+                      <ChevronLeft size={18} />
+                    </button>
+
+                    <div className="relative flex items-center gap-2 px-3.5 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl cursor-pointer hover:bg-slate-100">
+                      <Calendar size={16} className="text-indigo-600 dark:text-indigo-400" />
+                      <span className="font-black text-xs sm:text-sm text-slate-900 dark:text-white">
+                        {format(globalSelectedDate, 'EEEE، dd MMMM yyyy', { locale: ar })}
+                      </span>
+                      <input 
+                        type="date" 
+                        value={format(globalSelectedDate, 'yyyy-MM-dd')}
+                        onChange={(e) => {
+                          if (e.target.value) {
+                            setGlobalSelectedDate(new Date(e.target.value + 'T00:00:00'));
+                          }
+                        }}
+                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Mode switcher */}
+                  <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl border border-slate-200 dark:border-slate-700 self-start md:self-auto">
+                    <button
+                      type="button"
+                      onClick={() => setCarViewTab('daily')}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                        carViewTab === 'daily'
+                          ? 'bg-indigo-600 text-white shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                      }`}
+                    >
+                      <ListTodo size={14} />
+                      <span>مهام اليوم ({carCleaningDailyRequests.length})</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCarViewTab('sheet')}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                        carViewTab === 'sheet'
+                          ? 'bg-indigo-600 text-white shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                      }`}
+                    >
+                      <CalendarPlus size={14} />
+                      <span>جدول اشتراكات الشهر ({activeCarSubscriptionsForSelectedMonth.length})</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCarViewTab('week-schedule')}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                        carViewTab === 'week-schedule'
+                          ? 'bg-indigo-600 text-white shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                      }`}
+                    >
+                      <CalendarCheck size={14} />
+                      <span>توزيع جدول الأسبوع</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3. Horizontal 7-Day Week Strip */}
+                <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800/80">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+                    {weekStripDays.map(d => {
+                      const isSelected = isSameDay(d.date, globalSelectedDate);
+                      return (
+                        <button
+                          key={d.date.toISOString()}
+                          type="button"
+                          onClick={() => setGlobalSelectedDate(d.date)}
+                          className={`p-3 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center justify-between gap-1.5 relative ${
+                            isSelected
+                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-500/25 ring-2 ring-indigo-500/30'
+                              : d.isToday
+                              ? 'bg-indigo-50/80 dark:bg-indigo-950/40 text-slate-900 dark:text-slate-100 border-indigo-300 dark:border-indigo-700 hover:bg-indigo-100/70'
+                              : 'bg-slate-50/70 dark:bg-slate-800/50 text-slate-800 dark:text-slate-200 border-slate-200/70 dark:border-slate-700/60 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          {d.isToday && !isSelected && (
+                            <span className="absolute -top-1.5 right-2 px-1.5 py-0.2 bg-indigo-500 text-white text-[9px] font-black rounded-full">
+                              اليوم
+                            </span>
+                          )}
+                          <span className={`text-[11px] font-bold ${isSelected ? 'text-indigo-100' : 'text-slate-500 dark:text-slate-400'}`}>
+                            {d.dayName}
+                          </span>
+                          <span className="text-base font-black">
+                            {d.dayNumber} {d.monthName}
+                          </span>
+                          <div className="flex items-center gap-1 mt-0.5">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                              isSelected
+                                ? 'bg-white/20 text-white'
+                                : d.totalCars > 0
+                                ? 'bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300'
+                                : 'bg-slate-200/70 dark:bg-slate-700 text-slate-500'
+                            }`}>
+                              {d.totalCars} {d.totalCars === 1 ? 'سيارة' : d.totalCars === 2 ? 'سيارتان' : 'سيارات'}
+                            </span>
+                          </div>
+                          {d.totalCars > 0 && (
+                            <span className={`text-[9px] font-bold ${
+                              isSelected ? 'text-indigo-100' : d.allDone ? 'text-emerald-600 font-black' : 'text-slate-500'
+                            }`}>
+                              {d.allDone ? '✓ مكتمل' : `${d.completedCount}/${d.totalCars} منجز`}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
-              
-              {carCleaningDailyRequests.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {carCleaningDailyRequests.map((req) => {
-                    const isTaskCompleted = req.isSubscription 
-                      ? (req.completedDates || []).includes(format(globalSelectedDate, 'yyyy-MM-dd'))
-                      : req.status === 'completed';
-                      
-                    return (
-                      <motion.div 
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        key={req.id}
-                        className={cn(
-                          "p-5 rounded-[2rem] border-2 flex items-center justify-between transition-all",
-                          isTaskCompleted 
-                            ? "bg-emerald-50 border-emerald-100 text-emerald-800 dark:bg-emerald-900/20 dark:border-emerald-900/30 dark:text-emerald-400" 
-                            : "bg-amber-50 border-amber-100 text-amber-800 shadow-lg shadow-amber-100/50 dark:bg-amber-900/20 dark:border-amber-900/30 dark:text-amber-400 dark:shadow-none"
-                        )}
-                      >
-                        <div className="flex items-center gap-4">
-                          <div className={cn(
-                            "w-12 h-12 rounded-2xl flex items-center justify-center transition-all",
-                            isTaskCompleted ? "bg-emerald-200 text-emerald-700" : "bg-amber-600 text-white"
-                          )}>
-                            <Car size={24} />
-                          </div>
+
+              {/* View A: Weekly Schedule Distribution Overview */}
+              {carViewTab === 'week-schedule' && (
+                <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/80 dark:border-slate-800 rounded-[2.5rem] p-6 sm:p-8 shadow-sm space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
+                        <div className="w-2 h-6 bg-indigo-600 rounded-full" />
+                        توزيع اشتراكات السيارات على أيام الأسبوع (وفقاً للجدول الأصلي)
+                      </h3>
+                      <p className="text-xs font-bold text-slate-500 dark:text-slate-400 mt-1">
+                        اضغط على أي يوم لعرض سياراته ومتابعة إنجاز غسيلها لليوم المختار
+                      </p>
+                    </div>
+                    <span className="text-xs font-black bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 px-3 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800">
+                      المجموع لشهر {format(selectedMonth, 'MMMM yyyy', { locale: ar })}: {activeCarSubscriptionsForSelectedMonth.length * 2} غسلة أسبوعياً • {activeCarSubscriptionsForSelectedMonth.length * 8} غسلة شهرياً
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {weeklyScheduleSummary.map(d => {
+                      const totalDayRevenue = d.cars.reduce((s, c) => s + (c.price || 0), 0);
+                      return (
+                        <div
+                          key={d.id}
+                          className="bg-slate-50/80 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 rounded-3xl p-5 flex flex-col justify-between hover:shadow-md transition-all group"
+                        >
                           <div>
-                            <p className="text-xs font-bold opacity-70 mb-0.5">رقم اللوحة</p>
-                            <div className="flex items-center gap-2">
-                              <p className="text-lg font-black tracking-wider">{req.apartmentNumber}</p>
-                              <span className="text-xs font-black bg-white/50 dark:bg-black/20 px-2 py-0.5 rounded-lg">
-                                {req.isSubscription ? (
-                                  <div className="flex items-center gap-1">
-                                    <CalendarCheck size={10} />
-                                    <span>اشتراك</span>
-                                  </div>
-                                ) : format(safeToDate(req.date), 'p', { locale: ar })}
+                            <div className="flex items-center justify-between mb-3 pb-3 border-b border-slate-200/70 dark:border-slate-700/60">
+                              <div className="flex items-center gap-2">
+                                <span className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-black text-xs shadow-xs">
+                                  {d.id === 0 ? 'ح' : d.id === 1 ? 'ن' : d.id === 2 ? 'ث' : d.id === 3 ? 'ر' : d.id === 4 ? 'خ' : d.id === 5 ? 'ج' : 'س'}
+                                </span>
+                                <h4 className="font-black text-slate-900 dark:text-white text-base">يوم {d.name}</h4>
+                              </div>
+                              <span className="px-2.5 py-1 bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 rounded-xl text-xs font-black">
+                                {d.count} سيارات
                               </span>
                             </div>
-                            <motion.div 
-                              whileHover={{ scale: 1.05 }}
-                              whileTap={{ scale: 0.95 }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                updateStatus(req.id, 'paymentStatus', req.paymentStatus === 'paid' ? 'unpaid' : 'paid');
-                              }}
-                              className={cn(
-                                "mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-black cursor-pointer transition-all",
-                                req.paymentStatus === 'paid' ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
-                              )}
-                            >
-                              {req.paymentStatus === 'paid' ? <CheckCircle size={10} /> : <XCircle size={10} />}
-                              {req.paymentStatus === 'paid' ? 'مدفوع' : 'غير مدفوع'}
-                            </motion.div>
+
+                            <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-2">
+                              قائمة الشقق والسيارات المجدولة:
+                            </p>
+                            <div className="flex flex-wrap gap-1.5 mb-4 max-h-40 overflow-y-auto custom-scrollbar">
+                              {d.cars.map((c, cIdx) => (
+                                <span
+                                  key={`${c.id || 'car'}-${cIdx}`}
+                                  className="inline-flex items-center gap-1 px-2 py-1 bg-white dark:bg-slate-700 rounded-xl border border-slate-200 dark:border-slate-600 text-[11px] font-bold text-slate-800 dark:text-slate-200"
+                                  title={`${c.car || 'سيارة'} | باقة ${c.packageSize || 'كبيرة'} | العامل: ${c.workerName || 'غير محدد'}`}
+                                >
+                                  <span className="font-black text-indigo-600 dark:text-indigo-400">شقة {c.apartmentNumber}</span>
+                                  {c.car && <span className="opacity-70 text-[10px]">({c.car})</span>}
+                                </span>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                        <div className="flex flex-col items-end gap-2">
-                          <motion.button 
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                            onClick={() => {
-                              toggleDailyCompletion(req, globalSelectedDate);
-                            }}
-                            className="text-left"
-                          >
-                            <p className="text-[10px] font-bold opacity-70 uppercase mb-1">الحالة</p>
-                            <span className={cn(
-                              "px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all",
-                              isTaskCompleted ? "bg-green-200 text-green-800" : "bg-orange-200 text-orange-800"
-                            )}>
-                              {isTaskCompleted ? '✓ تم التنفيذ' : '✕ لم يتم التنفيذ'}
+
+                          <div className="pt-3 border-t border-slate-200/70 dark:border-slate-700/60 flex items-center justify-between">
+                            <span className="text-[10px] font-black text-emerald-600">
+                              {totalDayRevenue.toLocaleString()} ر.س شهرياً
                             </span>
-                          </motion.button>
-                          <div className="flex items-center gap-1">
-                            <motion.button
-                              whileHover={{ scale: 1.1 }}
-                              whileTap={{ scale: 0.9 }}
+                            <button
+                              type="button"
                               onClick={() => {
-                                setEditingRequest(req);
-                                setIsModalOpen(true);
+                                // Jump to upcoming date of this day
+                                const now = new Date();
+                                const currentDay = now.getDay();
+                                const diff = (d.id - currentDay + 7) % 7;
+                                const target = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diff);
+                                setGlobalSelectedDate(target);
+                                setCarViewTab('daily');
                               }}
-                              className="p-1.5 hover:bg-white/50 rounded-lg text-gray-500 transition-all"
+                              className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black transition-all cursor-pointer shadow-xs"
                             >
-                              <Pencil size={14} />
-                            </motion.button>
-                            <motion.button
-                              whileHover={{ scale: 1.1 }}
-                              whileTap={{ scale: 0.9 }}
-                              onClick={() => setConfirmDeleteId(req.id)}
-                              className="p-1.5 hover:bg-red-50 rounded-lg text-red-500 transition-all"
-                            >
-                              <Trash2 size={14} />
-                            </motion.button>
+                              عرض سيارات هذا اليوم 👈
+                            </button>
                           </div>
                         </div>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="bg-gray-50 p-8 rounded-[2rem] border border-dashed border-gray-200 text-center">
-                  <p className="text-gray-400 font-bold">لا توجد سيارات مجدولة للغسيل اليوم</p>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
+
+              {/* View C: Monthly Subscriptions Spreadsheet (Filtered for selectedMonth) */}
+              {carViewTab === 'sheet' && (
+                <div className="space-y-4">
+                  <CarSubscriptionsExcelSheet
+                    requests={requests}
+                    user={user}
+                    selectedMonth={selectedMonth}
+                    onSelectMonth={(m) => {
+                      setSelectedMonth(m);
+                      setGlobalSelectedDate(m);
+                    }}
+                    onOpenNewSubscriptionModal={() => setIsSubscriptionModalOpen(true)}
+                    setActiveTab={setActiveTab}
+                    onSelectDate={(d) => {
+                      setGlobalSelectedDate(d);
+                      setCarViewTab('daily');
+                    }}
+                    deletedCarSubKeys={deletedCarSubKeys}
+                    onDeleteAll={handleDeleteAllCarRequests}
+                    onRestoreDefaults={handleRestoreDefaultCarSubscriptions}
+                  />
+                </div>
+              )}
+
+              {/* View B: Daily Tasks List (Main View) */}
+              {carViewTab === 'daily' && (
+                <>
+                  {/* Daily Metric Cards */}
+                  {(() => {
+                    const dateStr = format(globalSelectedDate, 'yyyy-MM-dd');
+                    const totalScheduled = carCleaningDailyRequests.length;
+                    const completedCount = carCleaningDailyRequests.filter(r => 
+                      r.isSubscription ? (r.completedDates || []).includes(dateStr) : r.status === 'completed'
+                    ).length;
+                    const pendingCount = totalScheduled - completedCount;
+                    const paidCount = carCleaningDailyRequests.filter(r => r.paymentStatus === 'paid').length;
+                    const unpaidCount = totalScheduled - paidCount;
+
+                    return (
+                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 shadow-sm flex items-center gap-3">
+                          <div className="w-12 h-12 rounded-2xl bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                            <Car size={22} />
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-slate-500 dark:text-slate-400">سيارات مجدولة اليوم</span>
+                            <div className="flex items-baseline gap-1 mt-0.5">
+                              <span className="text-2xl font-black text-slate-900 dark:text-white">{totalScheduled}</span>
+                              <span className="text-xs font-bold text-slate-500">سيارة</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 shadow-sm flex items-center gap-3">
+                          <div className="w-12 h-12 rounded-2xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                            <CheckCircle2 size={22} />
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-slate-500 dark:text-slate-400">تم الغسيل بنجاح</span>
+                            <div className="flex items-baseline gap-1 mt-0.5">
+                              <span className="text-2xl font-black text-emerald-600">{completedCount}</span>
+                              <span className="text-xs font-bold text-emerald-600">منجزة</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 shadow-sm flex items-center gap-3">
+                          <div className="w-12 h-12 rounded-2xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                            <Clock size={22} />
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-slate-500 dark:text-slate-400">بانتظار التنفيذ</span>
+                            <div className="flex items-baseline gap-1 mt-0.5">
+                              <span className="text-2xl font-black text-amber-600">{pendingCount}</span>
+                              <span className="text-xs font-bold text-amber-600">متبقية</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 shadow-sm flex items-center gap-3">
+                          <div className="w-12 h-12 rounded-2xl bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+                            <CreditCard size={22} />
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-slate-500 dark:text-slate-400">حالة السداد للمشتركين</span>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-xs font-black text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-lg">
+                                {paidCount} مدفوع
+                              </span>
+                              <span className="text-xs font-black text-rose-600 bg-rose-50 dark:bg-rose-950/40 px-2 py-0.5 rounded-lg">
+                                {unpaidCount} غير مدفوع
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Search and Filters Bar */}
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 shadow-sm flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+                    
+                    {/* Search */}
+                    <div className="relative flex-1 max-w-md">
+                      <Search size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold" />
+                      <input
+                        type="text"
+                        placeholder="ابحث برقم الشقة، السيارة، أو العامل..."
+                        value={carDailySearch}
+                        onChange={(e) => setCarDailySearch(e.target.value)}
+                        className="w-full pr-10 pl-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                      />
+                    </div>
+
+                    {/* Filter Badges */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => setCarDailyStatusFilter('all')}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                          carDailyStatusFilter === 'all'
+                            ? 'bg-indigo-600 text-white shadow-xs'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
+                        }`}
+                      >
+                        الكل ({carCleaningDailyRequests.length})
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setCarDailyStatusFilter('pending')}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                          carDailyStatusFilter === 'pending'
+                            ? 'bg-amber-600 text-white shadow-xs'
+                            : 'bg-slate-100 dark:bg-slate-800 text-amber-700 dark:text-amber-400 hover:bg-slate-200'
+                        }`}
+                      >
+                        ⏳ بانتظار الغسيل ({
+                          carCleaningDailyRequests.filter(r => {
+                            const dStr = format(globalSelectedDate, 'yyyy-MM-dd');
+                            return !(r.completedDates || []).includes(dStr);
+                          }).length
+                        })
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setCarDailyStatusFilter('completed')}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                          carDailyStatusFilter === 'completed'
+                            ? 'bg-emerald-600 text-white shadow-xs'
+                            : 'bg-slate-100 dark:bg-slate-800 text-emerald-700 dark:text-emerald-400 hover:bg-slate-200'
+                        }`}
+                      >
+                        ✓ تم الغسيل ({
+                          carCleaningDailyRequests.filter(r => {
+                            const dStr = format(globalSelectedDate, 'yyyy-MM-dd');
+                            return (r.completedDates || []).includes(dStr);
+                          }).length
+                        })
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setCarDailyStatusFilter(carDailyStatusFilter === 'paid' ? 'all' : 'paid')}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                          carDailyStatusFilter === 'paid'
+                            ? 'bg-emerald-600 text-white shadow-xs'
+                            : 'bg-slate-100 dark:bg-slate-800 text-emerald-700 hover:bg-slate-200'
+                        }`}
+                      >
+                        مدفوع
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setCarDailyStatusFilter(carDailyStatusFilter === 'unpaid' ? 'all' : 'unpaid')}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                          carDailyStatusFilter === 'unpaid'
+                            ? 'bg-rose-600 text-white shadow-xs'
+                            : 'bg-slate-100 dark:bg-slate-800 text-rose-700 hover:bg-slate-200'
+                        }`}
+                      >
+                        غير مدفوع
+                      </button>
+                    </div>
+
+                    {/* Worker Selector & Delete All */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <select
+                        value={carDailyWorkerFilter}
+                        onChange={(e) => setCarDailyWorkerFilter(e.target.value)}
+                        className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="all">كل طواقم العمالة</option>
+                        {Array.from(new Set(mergedAllCarRequests.map(r => r.workerName).filter(Boolean))).map(w => (
+                          <option key={w} value={w!}>{w}</option>
+                        ))}
+                      </select>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsDeleteAllCarsModalOpen(true)}
+                        disabled={mergedAllCarRequests.length === 0}
+                        className="flex items-center gap-1.5 px-3.5 py-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800/60 rounded-xl text-xs font-black transition-all cursor-pointer shadow-2xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                        title="حذف كافة طلبات تنظيف السيارات"
+                      >
+                        <Trash2 size={14} />
+                        <span>حذف الكل</span>
+                      </button>
+                    </div>
+
+                  </div>
+
+                  {/* Cards Grid */}
+                  {(() => {
+                    const dateStr = format(globalSelectedDate, 'yyyy-MM-dd');
+                    const filtered = carCleaningDailyRequests.filter(req => {
+                      if (carDailySearch.trim()) {
+                        const q = carDailySearch.trim().toLowerCase();
+                        const aptMatch = (req.apartmentNumber || req.apartment || '').toLowerCase().includes(q);
+                        const carMatch = (req.car || '').toLowerCase().includes(q);
+                        const workerMatch = (req.workerName || '').toLowerCase().includes(q);
+                        const notesMatch = (req.notes || '').toLowerCase().includes(q);
+                        if (!aptMatch && !carMatch && !workerMatch && !notesMatch) return false;
+                      }
+                      const isTaskCompleted = req.isSubscription 
+                        ? (req.completedDates || []).includes(dateStr) 
+                        : req.status === 'completed';
+
+                      if (carDailyStatusFilter === 'pending' && isTaskCompleted) return false;
+                      if (carDailyStatusFilter === 'completed' && !isTaskCompleted) return false;
+                      if (carDailyStatusFilter === 'paid' && req.paymentStatus !== 'paid') return false;
+                      if (carDailyStatusFilter === 'unpaid' && req.paymentStatus === 'paid') return false;
+
+                      if (carDailyWorkerFilter !== 'all') {
+                        if (!req.workerName || !req.workerName.includes(carDailyWorkerFilter)) return false;
+                      }
+                      if (carDailyPackageFilter !== 'all') {
+                        const isLarge = req.packageSize === 'كبيرة' || req.price === 200;
+                        if (carDailyPackageFilter === 'كبيرة' && !isLarge) return false;
+                        if (carDailyPackageFilter === 'صغيرة' && isLarge) return false;
+                      }
+                      return true;
+                    });
+
+                    if (filtered.length === 0) {
+                      return (
+                        <div className="bg-white dark:bg-slate-900 p-12 rounded-[2.5rem] border border-dashed border-slate-200 dark:border-slate-800 text-center space-y-3">
+                          <div className="w-16 h-16 rounded-3xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-500 mx-auto flex items-center justify-center">
+                            <Car size={32} />
+                          </div>
+                          <h4 className="text-base font-black text-slate-800 dark:text-slate-200">
+                            {mergedAllCarRequests.length === 0 ? 'تم حذف كافة اشتراكات وطلبات تنظيف السيارات' : 'لا توجد سيارات مجدولة للغسيل في هذا اليوم'}
+                          </h4>
+                          <p className="text-xs font-bold text-slate-500 max-w-md mx-auto">
+                            {mergedAllCarRequests.length === 0
+                              ? 'تم إفراغ قسم تنظيف السيارات بنجاح. يمكنك إضافة اشتراك جديد في أي وقت، أو استعادة الاشتراكات الافتراضية.'
+                              : 'يمكنك التبديل بين أيام الأسبوع من الشريط العلوي (الأحد إلى السبت) أو فتح جدول اشتراكات السيارات الشامل.'}
+                          </p>
+                          <div className="pt-2 flex items-center justify-center gap-3 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingRequest(null);
+                                setIsSubscriptionModalOpen(true);
+                              }}
+                              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer"
+                            >
+                              + إضافة اشتراك سيارة جديد
+                            </button>
+                            {deletedCarSubKeys.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={handleRestoreDefaultCarSubscriptions}
+                                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-black transition-all cursor-pointer"
+                              >
+                                استعادة الاشتراكات الافتراضية ↺
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setActiveTab('car-subscriptions')}
+                              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-black transition-all cursor-pointer"
+                            >
+                              الانتقال لجدول اشتراكات السيارات 📊
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {filtered.map((req, reqIdx) => {
+                          const isTaskCompleted = req.isSubscription 
+                            ? (req.completedDates || []).includes(dateStr)
+                            : req.status === 'completed';
+                          const isLarge = req.packageSize === 'كبيرة' || req.price === 200;
+
+                          return (
+                            <motion.div
+                              layout
+                              initial={{ opacity: 0, y: 15 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              key={`${req.id || 'car'}-${reqIdx}`}
+                              className={`p-6 rounded-[2.5rem] border-2 transition-all flex flex-col justify-between ${
+                                isTaskCompleted
+                                  ? 'bg-emerald-50/70 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/50 shadow-sm'
+                                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md'
+                              }`}
+                            >
+                              {/* Top Bar: Apartment Badge, Package Size, Payment Badge */}
+                              <div>
+                                <div className="flex items-center justify-between mb-4">
+                                  <div className="flex items-center gap-2">
+                                    <div className="px-3 py-1.5 bg-[#4338ca] text-white rounded-xl text-xs font-black shadow-xs flex items-center gap-1.5">
+                                      <span>شقة {req.apartmentNumber}</span>
+                                    </div>
+                                    <span className={`px-2.5 py-1 rounded-xl text-[10px] font-black border ${
+                                      isLarge
+                                        ? 'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800'
+                                        : 'bg-teal-50 dark:bg-teal-950/50 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800'
+                                    }`}>
+                                      {isLarge ? 'باقة كبيرة • 200 ر.س' : 'باقة صغيرة • 150 ر.س'}
+                                    </span>
+                                  </div>
+
+                                  {/* Payment status badge (clickable toggle) */}
+                                  <motion.button
+                                    whileHover={{ scale: 1.05 }}
+                                    whileTap={{ scale: 0.95 }}
+                                    type="button"
+                                    onClick={() => updateStatus(req.id, 'paymentStatus', req.paymentStatus === 'paid' ? 'unpaid' : 'paid')}
+                                    className={`px-2.5 py-1 rounded-xl text-[10px] font-black cursor-pointer transition-all flex items-center gap-1 ${
+                                      req.paymentStatus === 'paid'
+                                        ? 'bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300'
+                                        : 'bg-rose-100 dark:bg-rose-900/60 text-rose-800 dark:text-rose-300'
+                                    }`}
+                                    title="اضغط لتغيير حالة السداد"
+                                  >
+                                    {req.paymentStatus === 'paid' ? <CheckCircle2 size={11} /> : <XCircle size={11} />}
+                                    <span>{req.paymentStatus === 'paid' ? 'مدفوع' : 'غير مدفوع'}</span>
+                                  </motion.button>
+                                </div>
+
+                                {/* Car Name & Icon */}
+                                <div className="flex items-center gap-3 mb-3 p-3 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-100 dark:border-slate-800">
+                                  <div className="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                                    <Car size={20} />
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <span className="text-[10px] font-bold text-slate-400 block mb-0.5">موديل ونوع السيارة</span>
+                                    <h4 className="font-black text-slate-900 dark:text-white text-sm truncate">
+                                      {req.car || `سيارة شقة ${req.apartmentNumber}`}
+                                    </h4>
+                                  </div>
+                                </div>
+
+                                {/* Meta: Worker & Schedule Days */}
+                                <div className="space-y-1.5 text-xs font-bold text-slate-600 dark:text-slate-300 mb-4">
+                                  <div className="flex items-center justify-between text-[11px] p-2 bg-slate-50/70 dark:bg-slate-800/40 rounded-xl">
+                                    <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                                      <UserIcon size={12} className="text-indigo-500" />
+                                      <span>طاقم العمالة:</span>
+                                    </span>
+                                    <span className="font-black text-slate-900 dark:text-white">
+                                      {req.workerName || 'فريق غسيل السيارات'}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center justify-between text-[11px] p-2 bg-slate-50/70 dark:bg-slate-800/40 rounded-xl">
+                                    <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                                      <Calendar size={12} className="text-amber-500" />
+                                      <span>أيام الغسيل:</span>
+                                    </span>
+                                    <span className="font-black text-slate-900 dark:text-white">
+                                      {req.daysText || 'حسب جدول الاشتراك'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Bottom Actions: Completion Toggle + WhatsApp + Edit */}
+                              <div className="pt-3 border-t border-slate-150 dark:border-slate-800/80 flex items-center justify-between gap-2">
+                                <motion.button
+                                  whileHover={{ scale: 1.02 }}
+                                  whileTap={{ scale: 0.98 }}
+                                  type="button"
+                                  onClick={() => toggleDailyCompletion(req, globalSelectedDate)}
+                                  className={`flex-1 py-2.5 px-3 rounded-2xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                                    isTaskCompleted
+                                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm shadow-emerald-500/20'
+                                      : 'bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700/60'
+                                  }`}
+                                >
+                                  {isTaskCompleted ? (
+                                    <>
+                                      <CheckCircle2 size={15} />
+                                      <span>✓ تم الغسيل والتنفيذ</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Clock size={15} />
+                                      <span>⏳ بانتظار الغسيل (اضغط للإنجاز)</span>
+                                    </>
+                                  )}
+                                </motion.button>
+
+                                {/* WhatsApp Notification Button */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const dateText = format(globalSelectedDate, 'EEEE، dd MMMM', { locale: ar });
+                                    const carName = req.car || 'سيارتكم';
+                                    const aptNum = req.apartmentNumber || req.apartment;
+                                    const workerText = req.workerName ? `\n👷 العامل المنفذ: ${req.workerName}` : '';
+                                    const msg = `السلام عليكم ورحمة الله،\nنفيدكم بأنه تم الانتهاء من غسيل سيارتكم (${carName} - شقة ${aptNum}) لجدول اليوم (${dateText}) بنجاح. ✨🚗${workerText}\nشكراً لتعاملكم معنا!`;
+                                    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+                                  }}
+                                  className="p-2.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 transition-all cursor-pointer"
+                                  title="إرسال إشعار إتمام الغسيل عبر واتساب"
+                                >
+                                  <MessageCircle size={16} />
+                                </button>
+
+                                {/* Edit Button */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingRequest(req);
+                                    setIsSubscriptionModalOpen(true);
+                                  }}
+                                  className="p-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-all cursor-pointer"
+                                  title="تعديل الاشتراك"
+                                >
+                                  <Pencil size={15} />
+                                </button>
+
+                                {/* Delete Button */}
+                                <button
+                                  type="button"
+                                  onClick={() => setCarRequestToDelete(req)}
+                                  className="p-2.5 rounded-2xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/40 transition-all cursor-pointer"
+                                  title="حذف هذا الطلب"
+                                >
+                                  <Trash2 size={15} />
+                                </button>
+                              </div>
+                            </motion.div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </>
+              )}
+
             </div>
           )}
 
           {activeTab === 'car-subscriptions' && (
             <div className="mb-10 space-y-6">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-6">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-primary rounded-2xl flex items-center justify-center shadow-lg shadow-primary/20 dark:shadow-none">
                     <CalendarPlus className="text-white" size={24} />
@@ -14240,24 +16329,52 @@ function AppContent() {
                       إدارة اشتراكات غسيل السيارات
                     </h2>
                     <p className="text-gray-500 dark:text-slate-400 font-bold mt-1">
-                      متابعة وإضافة اشتراكات غسيل السيارات الشهرية
+                      متابعة وإضافة اشتراكات غسيل السيارات الشهرية وجدول الإكسيل المطابق للصورة
                     </p>
                   </div>
                 </div>
+
                 <div className="flex items-center gap-3 flex-wrap">
+                  {/* View Mode Toggle */}
+                  <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl border border-slate-200 dark:border-slate-700">
+                    <button
+                      type="button"
+                      onClick={() => setCarSubViewMode('excel')}
+                      className={`px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                        carSubViewMode === 'excel'
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                      }`}
+                    >
+                      <span>📊 جدول الإكسيل (مطابق للصورة)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCarSubViewMode('cards')}
+                      className={`px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                        carSubViewMode === 'cards'
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                      }`}
+                    >
+                      <span>🗂️ عرض البطاقات</span>
+                    </button>
+                  </div>
+
                   <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                     onClick={importCarSubscriptionsFromImage}
-                    className="flex items-center gap-2 px-4 py-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-2xl font-bold text-sm transition-all focus:outline-none cursor-pointer"
+                    className="flex items-center gap-2 px-4 py-2.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-2xl font-bold text-xs transition-all focus:outline-none cursor-pointer"
+                    title="استيراد وتحديث كافة بيانات الصورة (26 اشتراك)"
                   >
-                    <ImageIcon size={18} />
-                    <span>تغذية الصورة (محاكاة)</span>
+                    <ImageIcon size={16} />
+                    <span>تغذية الصورة (26 اشتراك)</span>
                   </motion.button>
 
-                  <label className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-sm shadow-xl shadow-emerald-200 dark:shadow-none transition-all focus:outline-none cursor-pointer">
-                    <ImageIcon size={18} />
-                    <span>تحليل وإدخال من صورة 📸</span>
+                  <label className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-xs shadow-md shadow-emerald-200 dark:shadow-none transition-all focus:outline-none cursor-pointer">
+                    <ImageIcon size={16} />
+                    <span>تحليل من صورة 📸</span>
                     <input 
                       type="file" 
                       accept="image/*" 
@@ -14269,24 +16386,56 @@ function AppContent() {
                   <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
+                    onClick={() => setIsDeleteAllCarsModalOpen(true)}
+                    disabled={mergedAllCarRequests.length === 0}
+                    className="flex items-center gap-2 px-4 py-2.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 rounded-2xl font-black text-xs border border-rose-200 dark:border-rose-800/60 transition-all cursor-pointer shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="حذف كافة اشتراكات تنظيف السيارات"
+                  >
+                    <Trash2 size={16} />
+                    <span>حذف الكل 🗑️</span>
+                  </motion.button>
+
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
                     onClick={() => {
                       setIsSubscriptionModalOpen(true);
                     }}
-                    className="flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-2xl font-black text-sm shadow-xl shadow-primary/20 transition-all focus:outline-none"
+                    className="flex items-center gap-2 px-5 py-2.5 bg-primary text-white rounded-2xl font-black text-xs shadow-md shadow-primary/20 transition-all focus:outline-none cursor-pointer"
                   >
-                    <CalendarPlus size={18} />
-                    <span>طلب اشتراك جديد</span>
+                    <CalendarPlus size={16} />
+                    <span>اشتراك جديد</span>
                   </motion.button>
                 </div>
               </div>
 
-              {/* Monthly Subscriptions Section */}
-              <div className="space-y-4 mb-10">
-                <h3 className="text-lg font-black text-gray-900 dark:text-white flex items-center gap-2">
-                  <div className="w-1.5 h-6 bg-emerald-500 rounded-full" />
-                  الاشتراكات النشطة حالياً
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* View 1: Excel Spreadsheet View (Default) */}
+              {carSubViewMode === 'excel' && (
+                <CarSubscriptionsExcelSheet 
+                  requests={requests} 
+                  user={user} 
+                  selectedMonth={selectedMonth}
+                  onSelectMonth={(d) => {
+                    setSelectedMonth(d);
+                    setGlobalSelectedDate(d);
+                  }}
+                  onOpenNewSubscriptionModal={() => setIsSubscriptionModalOpen(true)}
+                  setActiveTab={setActiveTab}
+                  onSelectDate={(d) => setGlobalSelectedDate(d)}
+                  deletedCarSubKeys={deletedCarSubKeys}
+                  onDeleteAll={handleDeleteAllCarRequests}
+                  onRestoreDefaults={handleRestoreDefaultCarSubscriptions}
+                />
+              )}
+
+              {/* View 2: Cards Grid View */}
+              {carSubViewMode === 'cards' && (
+                <div className="space-y-4 mb-10">
+                  <h3 className="text-lg font-black text-gray-900 dark:text-white flex items-center gap-2">
+                    <div className="w-1.5 h-6 bg-emerald-500 rounded-full" />
+                    الاشتراكات النشطة حالياً
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {requests
                     .filter(req => req.serviceType === 'تنظيف سيارات' && req.isSubscription && safeToDate(req.subscriptionEndDate) > new Date())
                     .map(sub => {
@@ -14480,6 +16629,7 @@ function AppContent() {
                   )}
                 </div>
               </div>
+            )}
             </div>
           )}
 
@@ -14500,6 +16650,19 @@ function AppContent() {
                     </p>
                   </div>
                 </div>
+
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => {
+                    setSelectedNorthAptForClaim(undefined);
+                    setIsNorthCleaningClaimModalOpen(true);
+                  }}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-sm shadow-lg shadow-emerald-600/20 dark:shadow-none transition-all cursor-pointer self-start md:self-auto"
+                >
+                  <ReceiptText size={18} />
+                  <span>إرسال إيصال / مطالبة للشقة</span>
+                </motion.button>
               </div>
               
               {requests.filter(req => 
@@ -14516,11 +16679,11 @@ function AppContent() {
                       req.serviceType !== 'توصيل مياه' &&
                       isSameDay(safeToDate(req.date), globalSelectedDate)
                     )
-                    .map((req) => (
+                    .map((req, reqIdx) => (
                       <motion.div 
                         initial={{ opacity: 0, scale: 0.95 }}
                         animate={{ opacity: 1, scale: 1 }}
-                        key={req.id}
+                        key={`${req.id || 'req'}-${reqIdx}`}
                         className={cn(
                           "p-5 rounded-[2rem] border-2 flex items-center justify-between transition-all",
                           req.status === 'completed' 
@@ -14596,21 +16759,21 @@ function AppContent() {
           )}
 
           {/* Requests Table/List/Calendar */}
-          {activeTab !== 'طلبات الماء' && activeTab !== 'staff' && (
-            <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-xl shadow-slate-100/10 dark:shadow-none border border-gray-100/80 dark:border-slate-800 overflow-hidden transition-all duration-300">
-            <div className="p-8 border-b border-gray-100 dark:border-slate-800/80 flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-6">
+          {activeTab !== 'طلبات الماء' && activeTab !== 'staff' && activeTab !== 'تنظيف سيارات' && activeTab !== 'car-subscriptions' && activeTab !== 'طلبات الصيانة' && activeTab !== 'tenants' && activeTab !== 'property-units' && (
+            <div className="bg-white/95 backdrop-blur-md rounded-[2.5rem] shadow-[0_4px_25px_-5px_rgba(244,114,182,0.07),0_2px_10px_-2px_rgba(0,0,0,0.02)] border border-pink-100/70 overflow-hidden transition-all duration-300">
+            <div className="p-8 border-b border-slate-100 flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-6">
               <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                <h3 className="text-xl font-black text-gray-900 dark:text-white font-cairo">
+                <h3 className="text-xl font-black text-slate-900 font-cairo">
                   {viewMode === 'list' ? 'سجل الطلبات التفصيلي' : viewMode === 'summary' ? 'ملخص الشقق' : 'تقويم الطلبات'}
                 </h3>
-                <div className="flex bg-gray-50 dark:bg-slate-800 p-1.5 rounded-[1.25rem] border border-gray-100 dark:border-slate-700/55 w-fit">
+                <div className="flex bg-slate-100/80 p-1.5 rounded-[1.25rem] border border-slate-200/70 w-fit">
                   <button 
                     onClick={() => setViewMode('list')}
                     className={cn(
-                      "px-4 py-2 rounded-xl text-xs font-black transition-all",
+                      "px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer",
                       viewMode === 'list' 
-                        ? "bg-white dark:bg-slate-700 text-primary dark:text-white shadow-sm" 
-                        : "text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200"
+                        ? "bg-[#0f172a] text-white shadow-xs" 
+                        : "text-slate-600 hover:text-slate-900 hover:bg-white"
                     )}
                   >
                     عرض القائمة
@@ -14618,10 +16781,10 @@ function AppContent() {
                   <button 
                     onClick={() => setViewMode('summary')}
                     className={cn(
-                      "px-4 py-2 rounded-xl text-xs font-black transition-all",
+                      "px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer",
                       viewMode === 'summary' 
-                        ? "bg-white dark:bg-slate-700 text-primary dark:text-white shadow-sm" 
-                        : "text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200"
+                        ? "bg-[#0f172a] text-white shadow-xs" 
+                        : "text-slate-600 hover:text-slate-900 hover:bg-white"
                     )}
                   >
                     ملخص الشقق
@@ -14629,10 +16792,10 @@ function AppContent() {
                   <button 
                     onClick={() => setViewMode('calendar')}
                     className={cn(
-                      "px-4 py-2 rounded-xl text-xs font-black transition-all",
+                      "px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer",
                       viewMode === 'calendar' 
-                        ? "bg-white dark:bg-slate-700 text-primary dark:text-white shadow-sm" 
-                        : "text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-slate-200"
+                        ? "bg-[#0f172a] text-white shadow-xs" 
+                        : "text-slate-600 hover:text-slate-900 hover:bg-white"
                     )}
                   >
                     التقويم
@@ -14713,7 +16876,7 @@ function AppContent() {
                   <tbody className="divide-y divide-gray-100/50 dark:divide-slate-800/50">
                     <AnimatePresence mode="popLayout">
                       {groupedFilteredRequests.length > 0 ? (
-                        groupedFilteredRequests.map((group) => {
+                        groupedFilteredRequests.map((group, groupIdx) => {
                           const displayReq = group.latest;
                           const hasMultiple = group.count > 1;
 
@@ -14732,7 +16895,7 @@ function AppContent() {
 
                           return (
                             <motion.tr 
-                              key={displayReq.id}
+                              key={`${displayReq.id || 'grp'}-${groupIdx}`}
                               layout
                               initial={{ opacity: 0, y: 10 }}
                               animate={{ opacity: 1, y: 0 }}
@@ -14874,29 +17037,25 @@ function AppContent() {
                                     whileTap={{ scale: 0.92 }}
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      const aptNum = displayReq.serviceType === 'تنظيف سيارات' ? getApartmentNum(displayReq) : displayReq.apartmentNumber;
-                                      const apt = apartments.find(a => a.buildingName === displayReq.buildingName && a.number === aptNum);
-                                      const tenant = apt ? tenants.find(t => t.id === apt.tenantId) : null;
-                                      
-                                      const dateStr = format(safeToDate(displayReq.date), 'yyyy/MM/dd');
-                                      const msg = `أهلاً بك، تم تأكيد وصول دفعتك بمبلغ ${group.totalPrice} ريال لطلب ${displayReq.serviceType} بتاريخ ${dateStr}`;
-                                      
-                                      if (tenant && tenant.phone) {
-                                        let cleanPhone = tenant.phone.trim();
-                                        if (cleanPhone.startsWith('0')) {
-                                          cleanPhone = '966' + cleanPhone.substring(1);
-                                        } else if (!cleanPhone.startsWith('+') && !cleanPhone.startsWith('966')) {
-                                          cleanPhone = '966' + cleanPhone;
-                                        }
-                                        window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(msg)}`, '_blank');
-                                      } else {
-                                        window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
-                                      }
+                                      setSelectedCleaningClaim({
+                                        request: displayReq,
+                                        totalPrice: group.totalPrice,
+                                        count: group.count,
+                                        isPaid: group.allPaid
+                                      });
                                     }}
-                                    className="p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 dark:bg-emerald-950/30 dark:hover:bg-emerald-900/30 dark:text-emerald-400 rounded-xl transition-all border border-emerald-200/40 dark:border-emerald-800/20 shrink-0 cursor-pointer"
-                                    title="إرسال تأكيد الدفع عبر الواتساب"
+                                    className={cn(
+                                      "p-2 rounded-xl transition-all border shrink-0 cursor-pointer flex items-center gap-1.5 shadow-xs",
+                                      group.allPaid
+                                        ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-600 dark:bg-emerald-950/30 dark:hover:bg-emerald-900/30 dark:text-emerald-400 border-emerald-200/40 dark:border-emerald-800/20"
+                                        : "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-500 shadow-sm shadow-emerald-500/25"
+                                    )}
+                                    title={group.allPaid ? "إرسال تأكيد استلام الدفع بالواتساب (عربي + إنجليزي)" : "مطالبة بمبلغ النظافة وتاريخ الرسالة بالواتساب (عربي + إنجليزي)"}
                                   >
-                                    <MessageCircle size={14} />
+                                    <MessageCircle size={14} className={group.allPaid ? "text-emerald-600 dark:text-emerald-400" : "text-white"} />
+                                    {!group.allPaid && (
+                                      <span className="text-[11px] font-black hidden xl:inline">مطالبة</span>
+                                    )}
                                   </motion.button>
                                 </div>
                               </td>
@@ -15154,9 +17313,9 @@ function AppContent() {
                             )}
                           </div>
                           <div className="space-y-1">
-                            {dayRequests.slice(0, 3).map(req => (
+                            {dayRequests.slice(0, 3).map((req, reqIdx) => (
                               <div 
-                                key={req.id}
+                                key={`${req.id || 'day'}-${reqIdx}`}
                                 className={cn(
                                   "text-[10px] p-1.5 rounded-lg font-bold truncate border",
                                   req.paymentStatus === 'paid' ? "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-orange-50 dark:bg-orange-900/20 border-orange-100 dark:border-orange-900/30 text-orange-700 dark:text-orange-400"
@@ -15294,6 +17453,22 @@ function AppContent() {
           setIsPrintingBulk(true);
         }}
         onDelete={(id) => setConfirmDeleteId(id)}
+        onClaimPayment={(req) => setSelectedCleaningClaim({
+          request: req,
+          totalPrice: req.price,
+          count: 1,
+          isPaid: req.paymentStatus === 'paid'
+        })}
+      />
+
+      <CleaningClaimWhatsAppModal
+        isOpen={!!selectedCleaningClaim}
+        onClose={() => setSelectedCleaningClaim(null)}
+        claimData={selectedCleaningClaim}
+        tenants={tenants}
+        apartments={apartments}
+        whatsappGroupLink={whatsappGroupLink}
+        safeToDate={safeToDate}
       />
 
       <ApartmentCodesModal
@@ -15408,6 +17583,27 @@ function AppContent() {
         )}
       </div>
 
+      <ConfirmModal 
+        isOpen={!!carRequestToDelete}
+        onClose={() => setCarRequestToDelete(null)}
+        onConfirm={() => carRequestToDelete && handleDeleteCarRequest(carRequestToDelete)}
+        title="تأكيد حذف طلب تنظيف السيارة"
+        message={`هل أنت متأكد من رغبتك في حذف سيارة شقة ${carRequestToDelete?.apartmentNumber || carRequestToDelete?.apartment || ''} (${carRequestToDelete?.car || 'سيارة'})؟ لا يمكن التراجع عن هذا الإجراء.`}
+        confirmText="تأكيد الحذف"
+        variant="danger"
+        icon={Trash2}
+      />
+
+      <ConfirmModal 
+        isOpen={isDeleteAllCarsModalOpen}
+        onClose={() => setIsDeleteAllCarsModalOpen(false)}
+        onConfirm={handleDeleteAllCarRequests}
+        title="تأكيد حذف الكل من تنظيف السيارات"
+        message={`هل أنت متأكد من رغبتك في حذف كافة طلبات واشتراكات تنظيف السيارات (${mergedAllCarRequests.length} اشتراك) نهائياً من النظام؟ لا يمكن التراجع عن هذا الإجراء.`}
+        confirmText="تأكيد حذف الكل نهائياً"
+        variant="danger"
+        icon={Trash2}
+      />
       <ConfirmModal 
         isOpen={!!confirmDeleteId}
         onClose={() => setConfirmDeleteId(null)}
@@ -15581,6 +17777,23 @@ function AppContent() {
         onMove={moveTenantToApartment}
       />
 
+      <NorthCleaningClaimReceiptModal
+        isOpen={isNorthCleaningClaimModalOpen}
+        onClose={() => {
+          setIsNorthCleaningClaimModalOpen(false);
+          setSelectedNorthAptForClaim(undefined);
+        }}
+        requests={requests}
+        apartments={apartments}
+        tenants={tenants}
+        whatsappGroupLink={whatsappGroupLink}
+        onUpdatePaymentStatus={async (id, status) => {
+          await updateStatus(id, 'paymentStatus', status);
+        }}
+        onPrintReceipt={(req) => setSelectedRequest(req)}
+        initialApartmentNumber={selectedNorthAptForClaim}
+      />
+
       {/* History Modal */}
       <AnimatePresence>
         {selectedHistoryGroup && (
@@ -15633,8 +17846,8 @@ function AppContent() {
 
               <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
                 <div className="space-y-4">
-                  {selectedHistoryGroup.map((req) => (
-                    <div key={req.id} className="flex flex-col md:flex-row md:items-center justify-between gap-6 p-6 bg-gray-50 dark:bg-slate-800/50 rounded-[2rem] border border-gray-100 dark:border-slate-700 hover:shadow-md transition-all">
+                  {selectedHistoryGroup.map((req, reqIdx) => (
+                    <div key={`${req.id || 'hist'}-${reqIdx}`} className="flex flex-col md:flex-row md:items-center justify-between gap-6 p-6 bg-gray-50 dark:bg-slate-800/50 rounded-[2rem] border border-gray-100 dark:border-slate-700 hover:shadow-md transition-all">
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 bg-white dark:bg-slate-800 rounded-2xl flex items-center justify-center shadow-sm">
                           {req.serviceType === 'تنظيف سيارات' ? <Car className="text-primary" size={24} /> : <Home className="text-primary" size={24} />}
@@ -15664,17 +17877,33 @@ function AppContent() {
                           </motion.button>
                         </div>
                         <div className="text-center">
-                          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">الدفع</p>
-                          <motion.button 
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                            onClick={() => updateStatus(req.id, 'paymentStatus', req.paymentStatus === 'paid' ? 'unpaid' : 'paid')}
-                            className={cn(
-                              "px-2 py-1 rounded-lg text-[10px] font-black transition-all cursor-pointer",
-                              req.paymentStatus === 'paid' ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" : "bg-rose-100 text-rose-700 hover:bg-rose-200"
-                            )}>
-                            {req.paymentStatus === 'paid' ? 'مدفوع' : 'لم يدفع'}
-                          </motion.button>
+                          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">الدفع والمطالبة</p>
+                          <div className="flex items-center justify-center gap-1.5">
+                            <motion.button 
+                              whileHover={{ scale: 1.05 }}
+                              whileTap={{ scale: 0.95 }}
+                              onClick={() => updateStatus(req.id, 'paymentStatus', req.paymentStatus === 'paid' ? 'unpaid' : 'paid')}
+                              className={cn(
+                                "px-2 py-1 rounded-lg text-[10px] font-black transition-all cursor-pointer",
+                                req.paymentStatus === 'paid' ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" : "bg-rose-100 text-rose-700 hover:bg-rose-200"
+                              )}>
+                              {req.paymentStatus === 'paid' ? 'مدفوع' : 'لم يدفع'}
+                            </motion.button>
+                            <motion.button
+                              whileHover={{ scale: 1.1 }}
+                              whileTap={{ scale: 0.9 }}
+                              onClick={() => setSelectedCleaningClaim({
+                                request: req,
+                                totalPrice: req.price,
+                                count: 1,
+                                isPaid: req.paymentStatus === 'paid'
+                              })}
+                              className="p-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 dark:bg-emerald-950/30 dark:hover:bg-emerald-900/30 dark:text-emerald-400 rounded-lg transition-all border border-emerald-200/40 dark:border-emerald-800/20 cursor-pointer"
+                              title="مطالبة بمبلغ النظافة وتاريخ الرسالة بالواتساب (عربي + إنجليزي)"
+                            >
+                              <MessageCircle size={13} />
+                            </motion.button>
+                          </div>
                         </div>
                         <div className="text-center">
                           <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">الكمية</p>
